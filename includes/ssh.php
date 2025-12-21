@@ -67,11 +67,16 @@ class SSHManager {
     public function listDirectory($path) {
         $path = $this->sanitizePath($path);
         
+        // Отладочная информация
+        error_log("SSHManager::listDirectory called with path: '{$path}'");
+        
         // Получаем информацию о текущей директории
-        $pwd = trim($this->executeCommand("cd " . escapeshellarg($path) . " && pwd"));
+        $pwd = trim($this->executeCommand("cd " . escapeshellarg($path) . " && pwd 2>&1"));
+        error_log("Current directory after cd: '{$pwd}'");
         
         // Получаем список файлов
-        $lsOutput = $this->executeCommand("cd " . escapeshellarg($path) . " && ls -la --group-directories-first");
+        $lsOutput = $this->executeCommand("cd " . escapeshellarg($path) . " && ls -la --group-directories-first 2>&1");
+        error_log("ls output length: " . strlen($lsOutput));
         
         return [
             'current_path' => $pwd,
