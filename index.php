@@ -34,7 +34,8 @@ try {
                     $currentServer = $serverName;
                     $currentPath = '/';
                 }
-                header('Location: index.php');
+                // Редирект без выхода
+                echo '<script>window.location.href = "index.php";</script>';
                 exit;
                 
             case 'browse':
@@ -72,13 +73,9 @@ try {
                     $fileData = $ssh->readFile($filePath);
                     $fileInfo = $ssh->getFileInfo($filePath);
                     
-                    if ($fileData['type'] === 'text') {
-                        $currentView = 'file';
-                        $fileContent = $fileData;
-                    } else {
-                        $currentView = 'file_info';
-                        $fileContent = $fileData;
-                    }
+                    // Всегда пытаемся показать как текст
+                    $currentView = 'file';
+                    $fileContent = $fileData;
                     
                     $_SESSION['current_file'] = $filePath;
                     $_SESSION['current_server'] = $serverName;
@@ -119,7 +116,7 @@ try {
                         
                         if ($name === '.' || $name === '..') continue;
                         
-                        $fullPath = rtrim($path, '/') . '/' . $name;
+                        $fullPath = ($path === '/') ? '/' . $name : rtrim($path, '/') . '/' . $name;
                         
                         if ($isDir) {
                             $tree['children'][] = [
@@ -147,19 +144,6 @@ try {
         }
     }
     
-    // Если передан путь в POST (из формы)
-    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['path'])) {
-        $serverName = $_POST['server'] ?? $_SESSION['current_server'] ?? '';
-        $path = $_POST['path'] ?? '/';
-        
-        if ($serverName) {
-            $_SESSION['current_server'] = $serverName;
-            $_SESSION['current_path'] = $path;
-            $currentServer = $serverName;
-            $currentPath = $path;
-        }
-    }
-    
 } catch (Exception $e) {
     $currentView = 'error';
     $errorMessage = "Ошибка: " . $e->getMessage();
@@ -181,10 +165,10 @@ function renderFileBrowser($listing, $serverName) {
     if ($listing['current_path'] !== '/') {
         $parentPath = dirname($listing['current_path']);
         $html .= '
-        <div class="file-item" onclick="navigateToDirectory(\'' . htmlspecialchars($serverName) . '\', \'' . htmlspecialchars($parentPath) . '\')">
+        <a href="?action=browse&server=' . urlencode($serverName) . '&path=' . urlencode($parentPath) . '" class="file-item">
             <div class="file-icon">⬆️</div>
             <div class="file-name">..</div>
-        </div>';
+        </a>';
     }
     
     $lines = explode("\n", $listing['listing']);
@@ -201,21 +185,21 @@ function renderFileBrowser($listing, $serverName) {
         
         if ($name === '.' || $name === '..') continue;
         
-        $fullPath = $listing['current_path'] . '/' . $name;
+        $fullPath = ($listing['current_path'] === '/') ? '/' . $name : $listing['current_path'] . '/' . $name;
         
         if ($isDir) {
             $html .= '
-            <div class="file-item" onclick="navigateToDirectory(\'' . htmlspecialchars($serverName) . '\', \'' . htmlspecialchars($fullPath) . '\')">
+            <a href="?action=browse&server=' . urlencode($serverName) . '&path=' . urlencode($fullPath) . '" class="file-item">
                 <div class="file-icon">📁</div>
                 <div class="file-name">' . htmlspecialchars($name) . '</div>
-            </div>';
+            </a>';
         } else {
             $html .= '
-            <div class="file-item" onclick="viewFile(\'' . htmlspecialchars($serverName) . '\', \'' . htmlspecialchars($fullPath) . '\')">
+            <a href="?action=view_file&server=' . urlencode($serverName) . '&file_path=' . urlencode($fullPath) . '" class="file-item">
                 <div class="file-icon">' . getFileIcon($name, false) . '</div>
                 <div class="file-name">' . htmlspecialchars($name) . '</div>
                 <div style="font-size: 11px; color: #718096; margin-top: 5px;">' . formatSize($size) . '</div>
-            </div>';
+            </a>';
         }
     }
     
@@ -319,7 +303,7 @@ if (isset($_GET['ajax'])) {
             margin-bottom: 2px;
         }
         
-        .tree-item {
+        .tree-link {
             display: flex;
             align-items: center;
             padding: 6px 8px;
@@ -329,13 +313,15 @@ if (isset($_GET['ajax'])) {
             user-select: none;
             text-decoration: none;
             color: inherit;
+            width: 100%;
         }
         
-        .tree-item:hover {
+        .tree-link:hover {
             background: #edf2f7;
+            text-decoration: none;
         }
         
-        .tree-item.active {
+        .tree-link.active {
             background: #e2e8f0;
             font-weight: bold;
         }
@@ -395,6 +381,9 @@ if (isset($_GET['ajax'])) {
             padding: 20px;
             background: #f7fafc;
             border-bottom: 1px solid #e2e8f0;
+            display: flex;
+            align-items: center;
+            gap: 15px;
         }
         
         .path-display {
@@ -406,6 +395,26 @@ if (isset($_GET['ajax'])) {
             border-radius: 5px;
             border: 1px solid #e2e8f0;
             word-break: break-all;
+            flex: 1;
+        }
+        
+        .back-btn {
+            padding: 8px 16px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .back-btn:hover {
+            background: #5a67d8;
+            text-decoration: none;
+            color: white;
         }
         
         .content-area {
@@ -436,6 +445,8 @@ if (isset($_GET['ajax'])) {
             align-items: center;
             justify-content: center;
             min-height: 120px;
+            text-decoration: none;
+            color: inherit;
         }
         
         .file-item:hover {
@@ -443,6 +454,8 @@ if (isset($_GET['ajax'])) {
             transform: translateY(-2px);
             box-shadow: 0 5px 15px rgba(0,0,0,0.1);
             background: white;
+            text-decoration: none;
+            color: inherit;
         }
         
         .file-icon {
@@ -468,6 +481,14 @@ if (isset($_GET['ajax'])) {
             white-space: pre-wrap;
             overflow-x: auto;
             max-height: 70vh;
+        }
+        
+        .file-content.binary {
+            background: #fed7d7;
+            color: #9b2c2c;
+            font-family: 'Segoe UI', sans-serif;
+            padding: 30px;
+            text-align: center;
         }
         
         .file-info-card {
@@ -532,27 +553,6 @@ if (isset($_GET['ajax'])) {
             color: #4a5568;
         }
         
-        /* Кнопки */
-        .btn {
-            padding: 8px 16px;
-            background: #667eea;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            transition: background 0.3s;
-            font-size: 14px;
-        }
-        
-        .btn:hover {
-            background: #5a67d8;
-        }
-        
-        .btn-sm {
-            padding: 4px 8px;
-            font-size: 12px;
-        }
-        
         /* Загрузчик */
         .loader {
             display: inline-block;
@@ -593,7 +593,7 @@ if (isset($_GET['ajax'])) {
                 <div class="servers-list">
                     <?php foreach ($availableServers as $server): ?>
                         <div class="server-item <?php echo $currentServer === $server ? 'active' : ''; ?>" 
-                             onclick="selectServer('<?php echo escapeOutput($server); ?>')">
+                             onclick="window.location.href='?action=select_server&server=<?php echo urlencode($server); ?>'">
                             <i class="fas fa-server"></i>
                             <span><?php echo escapeOutput($server); ?></span>
                         </div>
@@ -609,7 +609,7 @@ if (isset($_GET['ajax'])) {
             
             <div class="tree-container" id="treeContainer">
                 <?php if ($currentServer): ?>
-                    <div id="serverTree" data-server="<?php echo escapeOutput($currentServer); ?>"></div>
+                    <div id="serverTree"></div>
                 <?php else: ?>
                     <div class="welcome">
                         <i class="fas fa-mouse-pointer" style="font-size: 48px; color: #a0aec0; margin-bottom: 20px;"></i>
@@ -623,6 +623,10 @@ if (isset($_GET['ajax'])) {
         <div class="main-panel">
             <div class="main-header">
                 <?php if ($currentPath && $currentServer): ?>
+                    <a href="<?php echo $currentPath !== '/' ? '?action=browse&server=' . urlencode($currentServer) . '&path=' . urlencode(dirname($currentPath)) : '#'; ?>" 
+                       class="back-btn" <?php echo $currentPath === '/' ? 'style="visibility: hidden;"' : ''; ?>>
+                        <i class="fas fa-arrow-left"></i> Назад
+                    </a>
                     <div class="path-display" id="currentPath">
                         <i class="fas fa-folder"></i> 
                         <?php echo escapeOutput($currentPath); ?>
@@ -639,24 +643,19 @@ if (isset($_GET['ajax'])) {
                 <?php elseif ($currentView === 'error'): ?>
                     <div class="message error"><?php echo escapeOutput($errorMessage); ?></div>
                 
-                <?php elseif ($currentView === 'file' && isset($fileContent['content'])): ?>
+                <?php elseif ($currentView === 'file' && isset($fileContent)): ?>
                     <div class="file-info-card">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                             <h3 style="margin: 0;">
                                 <i class="fas fa-file"></i> 
-                                <?php echo escapeOutput(basename($_SESSION['current_file'] ?? '')); ?>
+                                <?php echo escapeOutput(basename($fileContent['path'] ?? '')); ?>
                             </h3>
-                            <div>
-                                <button class="btn btn-sm" onclick="goBack()">
-                                    <i class="fas fa-arrow-left"></i> Назад
-                                </button>
-                            </div>
                         </div>
                         
                         <div class="info-grid">
                             <div class="info-item">
                                 <span class="info-label">Путь:</span>
-                                <span class="info-value"><?php echo escapeOutput(dirname($_SESSION['current_file'] ?? '')); ?></span>
+                                <span class="info-value"><?php echo escapeOutput(dirname($fileContent['path'] ?? '')); ?></span>
                             </div>
                             <div class="info-item">
                                 <span class="info-label">Размер:</span>
@@ -681,17 +680,16 @@ if (isset($_GET['ajax'])) {
                         </div>
                     </div>
                     
-                    <div class="file-content"><?php echo escapeOutput($fileContent['content'] ?? ''); ?></div>
-                
-                <?php elseif ($currentView === 'file_info'): ?>
-                    <div class="message info">
-                        <h3><i class="fas fa-file-binary"></i> Бинарный файл</h3>
-                        <p>Тип: <?php echo escapeOutput($fileContent['file_type'] ?? ''); ?></p>
-                        <p>Размер: <?php echo formatSize($fileContent['size'] ?? 0); ?></p>
-                        <p>Нельзя отобразить содержимое бинарного файла.</p>
-                        <button class="btn" onclick="goBack()">
-                            <i class="fas fa-arrow-left"></i> Назад к списку файлов
-                        </button>
+                    <div class="file-content <?php echo $fileContent['type'] === 'binary' ? 'binary' : ''; ?>">
+                        <?php 
+                        if ($fileContent['type'] === 'binary') {
+                            echo "⚠️ Это бинарный файл. Не удалось отобразить содержимое.\n";
+                            echo "Размер: " . formatSize($fileContent['size']) . "\n";
+                            echo "Тип: " . escapeOutput($fileContent['file_type']);
+                        } else {
+                            echo escapeOutput($fileContent['content'] ?? '');
+                        }
+                        ?>
                     </div>
                 
                 <?php elseif ($currentServer && $currentPath): ?>
@@ -718,58 +716,94 @@ if (isset($_GET['ajax'])) {
     </div>
     
     <script>
-        // Глобальные переменные
-        let currentServer = '<?php echo escapeOutput($currentServer); ?>';
-        let currentPath = '<?php echo escapeOutput($currentPath); ?>';
-        let treeCache = {};
-        
-        // Выбор сервера
-        function selectServer(serverName) {
-            window.location.href = `?action=select_server&server=${encodeURIComponent(serverName)}`;
-        }
+        // Инициализация при загрузке страницы
+        document.addEventListener('DOMContentLoaded', function() {
+            const currentServer = '<?php echo escapeOutput($currentServer); ?>';
+            const currentPath = '<?php echo escapeOutput($currentPath); ?>';
+            
+            if (currentServer) {
+                // Загружаем дерево для текущего сервера
+                loadTree(currentServer, '/');
+                
+                // Загружаем содержимое текущей директории
+                if (currentPath) {
+                    loadDirectory(currentServer, currentPath);
+                }
+            }
+        });
         
         // Загрузка дерева
         async function loadTree(server, path = '/') {
             const treeContainer = document.getElementById('serverTree');
             if (!treeContainer) return;
             
-            const cacheKey = `${server}:${path}`;
+            treeContainer.innerHTML = '<div style="padding: 20px; text-align: center;"><div class="loader"></div> Загрузка дерева...</div>';
             
-            // Показываем загрузку
-            if (!treeCache[cacheKey]) {
-                treeContainer.innerHTML = '<div style="padding: 20px; text-align: center;"><div class="loader"></div> Загрузка...</div>';
-                
-                try {
-                    const response = await fetch(`?action=get_tree&server=${encodeURIComponent(server)}&path=${encodeURIComponent(path)}&ajax=1`);
-                    const data = await response.json();
-                    
-                    treeCache[cacheKey] = data;
-                    renderTree(treeContainer, data);
-                    
-                    // Если это корень, загружаем содержимое
-                    if (path === '/' && server === currentServer) {
-                        loadDirectory(server, '/');
-                    }
-                } catch (error) {
-                    treeContainer.innerHTML = `<div class="error">Ошибка загрузки: ${error.message}</div>`;
-                }
-            } else {
-                renderTree(treeContainer, treeCache[cacheKey]);
+            try {
+                const response = await fetch(`?action=get_tree&server=${encodeURIComponent(server)}&path=${encodeURIComponent(path)}&ajax=1`);
+                const data = await response.json();
+                renderTree(treeContainer, data, server);
+            } catch (error) {
+                treeContainer.innerHTML = `<div class="error">Ошибка загрузки дерева: ${error.message}</div>`;
             }
         }
         
-        // Функция для создания узла дерева (должна быть глобальной)
-        window.createTreeNode = function(item) {
+        // Отрисовка дерева
+        function renderTree(container, node, server) {
+            container.innerHTML = '';
+            
+            const ul = document.createElement('ul');
+            ul.className = 'tree';
+            
+            // Создаем корневой элемент
+            const rootLi = document.createElement('li');
+            rootLi.className = 'tree-node';
+            
+            const rootLink = document.createElement('a');
+            rootLink.href = `?action=browse&server=${encodeURIComponent(server)}&path=/`;
+            rootLink.className = 'tree-link';
+            
+            const rootIcon = document.createElement('span');
+            rootIcon.className = 'tree-icon';
+            rootIcon.innerHTML = '📁';
+            
+            const rootName = document.createElement('span');
+            rootName.className = 'tree-name';
+            rootName.textContent = '/';
+            
+            rootLink.appendChild(rootIcon);
+            rootLink.appendChild(rootName);
+            rootLi.appendChild(rootLink);
+            ul.appendChild(rootLi);
+            
+            // Рендерим дочерние элементы
+            if (node.children && node.children.length > 0) {
+                const childrenContainer = document.createElement('div');
+                childrenContainer.className = 'tree-children expanded';
+                
+                node.children.forEach(child => {
+                    const childElement = createTreeItem(child, server);
+                    childrenContainer.appendChild(childElement);
+                });
+                
+                rootLi.appendChild(childrenContainer);
+            }
+            
+            container.appendChild(ul);
+        }
+        
+        // Создание элемента дерева
+        function createTreeItem(item, server) {
             const li = document.createElement('li');
             li.className = 'tree-node';
-            li.dataset.path = item.path;
-            li.dataset.type = item.type;
             
-            const div = document.createElement('div');
-            div.className = 'tree-item';
-            if (item.path === currentPath) {
-                div.classList.add('active');
+            const link = document.createElement('a');
+            if (item.type === 'directory') {
+                link.href = `?action=browse&server=${encodeURIComponent(server)}&path=${encodeURIComponent(item.path)}`;
+            } else {
+                link.href = `?action=view_file&server=${encodeURIComponent(server)}&file_path=${encodeURIComponent(item.path)}`;
             }
+            link.className = 'tree-link';
             
             // Стрелка для директорий
             if (item.type === 'directory') {
@@ -777,15 +811,16 @@ if (isset($_GET['ajax'])) {
                 arrow.className = 'tree-arrow';
                 arrow.innerHTML = '▶';
                 arrow.onclick = (e) => {
+                    e.preventDefault();
                     e.stopPropagation();
-                    toggleDirectory(item.path, arrow, childrenContainer);
+                    toggleDirectory(item, arrow, li, server);
                 };
-                div.appendChild(arrow);
+                link.appendChild(arrow);
             } else {
                 const spacer = document.createElement('span');
                 spacer.className = 'tree-arrow';
                 spacer.style.visibility = 'hidden';
-                div.appendChild(spacer);
+                link.appendChild(spacer);
             }
             
             // Иконка
@@ -796,114 +831,78 @@ if (isset($_GET['ajax'])) {
             } else {
                 icon.innerHTML = item.icon || '📄';
             }
-            div.appendChild(icon);
+            link.appendChild(icon);
             
             // Имя
             const name = document.createElement('span');
             name.className = 'tree-name';
             name.textContent = item.name;
             name.title = item.path;
-            div.appendChild(name);
+            link.appendChild(name);
             
             // Размер для файлов
             if (item.type === 'file' && item.size) {
                 const size = document.createElement('span');
                 size.className = 'tree-size';
                 size.textContent = formatSize(parseInt(item.size));
-                div.appendChild(size);
+                link.appendChild(size);
             }
             
-            // Обработчик клика
-            div.onclick = () => {
-                if (item.type === 'directory') {
-                    navigateToDirectory(server, item.path);
-                } else {
-                    viewFile(server, item.path);
-                }
-            };
+            li.appendChild(link);
             
-            li.appendChild(div);
-            
-            // Дочерние элементы
-            if (item.type === 'directory' && item.children) {
+            // Контейнер для дочерних элементов
+            if (item.type === 'directory') {
                 const childrenContainer = document.createElement('div');
                 childrenContainer.className = 'tree-children';
                 li.appendChild(childrenContainer);
-                
-                if (item.children.length > 0) {
-                    item.children.forEach(child => {
-                        const childNode = window.createTreeNode(child);
-                        childrenContainer.appendChild(childNode);
-                    });
-                }
             }
             
             return li;
-        };
-        
-        // Отрисовка дерева
-        function renderTree(container, node) {
-            container.innerHTML = '';
-            
-            const ul = document.createElement('ul');
-            ul.className = 'tree';
-            
-            // Рендерим корневой узел
-            if (node.path === '/' && node.children) {
-                node.children.forEach(child => {
-                    const childNode = window.createTreeNode(child);
-                    ul.appendChild(childNode);
-                });
-            } else {
-                const nodeElement = window.createTreeNode(node);
-                ul.appendChild(nodeElement);
-            }
-            
-            container.appendChild(ul);
         }
         
         // Переключение директории
-        function toggleDirectory(path, arrow, container) {
-            const isExpanded = container.classList.contains('expanded');
+        async function toggleDirectory(item, arrow, li, server) {
+            const childrenContainer = li.querySelector('.tree-children');
+            const isExpanded = childrenContainer.classList.contains('expanded');
             
-            if (!isExpanded && (!container.hasChildNodes() || container.children.length === 0)) {
-                // Загружаем содержимое директории
+            if (isExpanded) {
+                arrow.innerHTML = '▶';
+                childrenContainer.classList.remove('expanded');
+                return;
+            }
+            
+            // Если директория еще не загружена
+            if (!childrenContainer.hasChildNodes() || childrenContainer.children.length === 0) {
                 arrow.innerHTML = '<div class="loader" style="display: inline-block; width: 12px; height: 12px;"></div>';
                 
-                fetch(`?action=get_tree&server=${encodeURIComponent(currentServer)}&path=${encodeURIComponent(path)}&ajax=1`)
-                    .then(response => response.json())
-                    .then(data => {
-                        arrow.innerHTML = '▼';
-                        container.classList.add('expanded');
-                        
-                        data.children.forEach(child => {
-                            const childNode = window.createTreeNode(child);
-                            container.appendChild(childNode);
-                        });
-                    })
-                    .catch(error => {
-                        arrow.innerHTML = '▶';
-                        console.error('Error loading directory:', error);
-                    });
-            } else {
-                if (isExpanded) {
-                    arrow.innerHTML = '▶';
-                    container.classList.remove('expanded');
-                } else {
+                try {
+                    const response = await fetch(`?action=get_tree&server=${encodeURIComponent(server)}&path=${encodeURIComponent(item.path)}&ajax=1`);
+                    const data = await response.json();
+                    
                     arrow.innerHTML = '▼';
-                    container.classList.add('expanded');
+                    childrenContainer.classList.add('expanded');
+                    
+                    if (data.children && data.children.length > 0) {
+                        data.children.forEach(child => {
+                            const childElement = createTreeItem(child, server);
+                            childrenContainer.appendChild(childElement);
+                        });
+                    } else {
+                        const emptyMsg = document.createElement('div');
+                        emptyMsg.style.padding = '5px 10px';
+                        emptyMsg.style.color = '#718096';
+                        emptyMsg.style.fontSize = '12px';
+                        emptyMsg.textContent = 'Папка пуста';
+                        childrenContainer.appendChild(emptyMsg);
+                    }
+                } catch (error) {
+                    arrow.innerHTML = '▶';
+                    console.error('Error loading directory:', error);
                 }
+            } else {
+                arrow.innerHTML = '▼';
+                childrenContainer.classList.add('expanded');
             }
-        }
-        
-        // Навигация по директории
-        function navigateToDirectory(server, path) {
-            window.location.href = `?action=browse&server=${encodeURIComponent(server)}&path=${encodeURIComponent(path)}`;
-        }
-        
-        // Просмотр файла
-        function viewFile(server, filePath) {
-            window.location.href = `?action=view_file&server=${encodeURIComponent(server)}&file_path=${encodeURIComponent(filePath)}`;
         }
         
         // Загрузка содержимого директории
@@ -917,24 +916,19 @@ if (isset($_GET['ajax'])) {
                 .then(response => response.text())
                 .then(html => {
                     browser.innerHTML = html;
-                    // Обновляем путь
-                    const pathDisplay = document.getElementById('currentPath');
-                    if (pathDisplay) {
-                        pathDisplay.innerHTML = `<i class="fas fa-folder"></i> ${path}`;
-                    }
+                    // Обновляем путь в заголовке
+                    updatePathDisplay(path);
                 })
                 .catch(error => {
                     browser.innerHTML = `<div class="error">Ошибка загрузки: ${error.message}</div>`;
                 });
         }
         
-        // Назад
-        function goBack() {
-            if (currentPath && currentPath !== '/') {
-                const parentPath = currentPath.split('/').slice(0, -1).join('/') || '/';
-                navigateToDirectory(currentServer, parentPath);
-            } else {
-                window.location.href = 'index.php';
+        // Обновление отображения пути
+        function updatePathDisplay(path) {
+            const pathDisplay = document.getElementById('currentPath');
+            if (pathDisplay) {
+                pathDisplay.innerHTML = `<i class="fas fa-folder"></i> ${path}`;
             }
         }
         
@@ -946,18 +940,6 @@ if (isset($_GET['ajax'])) {
             const i = Math.floor(Math.log(bytes) / Math.log(k));
             return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
         }
-        
-        // Инициализация при загрузке страницы
-        document.addEventListener('DOMContentLoaded', function() {
-            if (currentServer) {
-                loadTree(currentServer, '/');
-            }
-            
-            // Если уже есть текущий путь, загружаем его содержимое
-            if (currentServer && currentPath && currentPath !== '/') {
-                loadDirectory(currentServer, currentPath);
-            }
-        });
     </script>
 </body>
 </html>
