@@ -138,9 +138,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['path_input'])) {
 
 // Получаем список серверов из конфига для подсказок
 $availableServers = [];
-if (file_exists('config.php')) {
+$configExists = file_exists('config.php');
+if ($configExists) {
     require 'config.php';
-    $availableServers = array_keys($servers);
+    if (isset($servers) && is_array($servers)) {
+        $availableServers = array_keys($servers);
+    }
 }
 
 // Получаем последние значения из сессии
@@ -411,26 +414,13 @@ $last_path = $_SESSION['last_path'] ?? '/var/www/html';
                 </div>
             </form>
             
-            <?php if (!file_exists('config.php')): ?>
+            <?php if (!$configExists): ?>
                 <div class="error">
-                    <strong>Внимание:</strong> Файл config.php не найден. Создайте его по примеру ниже:
-                    <pre style="margin-top: 10px; padding: 10px; background: #fff; border-radius: 5px; overflow-x: auto;">
-&lt;?php
-$servers = [
-    'fvds30' => [
-        'host' => '192.168.1.100',
-        'port' => 22,
-        'user' => 'username',
-        'key_path' => '/путь/к/ssh/key' // без .pub
-    ],
-    'backup' => [
-        'host' => 'backup.example.com',
-        'port' => 2222,
-        'user' => 'user',
-        'password' => 'ваш_пароль'
-    ]
-];
-                    </pre>
+                    <strong>Внимание:</strong> Файл config.php не найден. Создайте его с конфигурацией серверов.
+                </div>
+            <?php elseif (empty($availableServers)): ?>
+                <div class="error">
+                    <strong>Ошибка конфигурации:</strong> В файле config.php не определен массив $servers или он пуст.
                 </div>
             <?php endif; ?>
             
@@ -446,29 +436,22 @@ $servers = [
                     <h3>📡 Доступные серверы:</h3>
                     <div class="servers-grid" id="serversGrid">
                         <?php foreach ($availableServers as $serverName): ?>
-                            <?php if (file_exists('config.php')): ?>
-                                <?php 
-                                require 'config.php';
-                                $server = $servers[$serverName] ?? [];
-                                ?>
-                                <div class="server-item" onclick="selectServer('<?php echo $serverName; ?>')">
-                                    <div class="server-name"><?php echo htmlspecialchars($serverName); ?></div>
-                                    <div class="server-details">
-                                        <?php echo htmlspecialchars($server['host'] ?? 'не указан'); ?>
-                                        <?php if (isset($server['port']) && $server['port'] != 22): ?>
-                                            :<?php echo $server['port']; ?>
-                                        <?php endif; ?>
-                                        <br>
-                                        Пользователь: <?php echo htmlspecialchars($server['user'] ?? 'не указан'); ?>
-                                    </div>
+                            <?php 
+                            $server = $servers[$serverName] ?? [];
+                            ?>
+                            <div class="server-item" onclick="selectServer('<?php echo $serverName; ?>')">
+                                <div class="server-name"><?php echo htmlspecialchars($serverName); ?></div>
+                                <div class="server-details">
+                                    <?php echo htmlspecialchars($server['host'] ?? 'не указан'); ?>
+                                    <?php if (isset($server['port']) && $server['port'] != 22): ?>
+                                        :<?php echo $server['port']; ?>
+                                    <?php endif; ?>
+                                    <br>
+                                    Пользователь: <?php echo htmlspecialchars($server['user'] ?? 'не указан'); ?>
                                 </div>
-                            <?php endif; ?>
+                            </div>
                         <?php endforeach; ?>
                     </div>
-                </div>
-            <?php elseif (file_exists('config.php')): ?>
-                <div class="info">
-                    Серверы не настроены в config.php. Добавьте серверы в массив $servers.
                 </div>
             <?php endif; ?>
         </div>
