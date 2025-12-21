@@ -1,5 +1,4 @@
 <?php
-
 session_start();
 
 // Подключаем модули
@@ -15,136 +14,139 @@ ini_set('display_errors', 1);
 $currentView = 'browser';
 $fileContent = null;
 $currentServer = $_SESSION['current_server'] ?? '';
-$currentPath = $_SESSION['current_path'] ?? '/';
+$currentPath = $_SESSION['current_path'] ?? START_PATH;
+
+// Определяем стартовую папку
+$startPath = defined('START_PATH') ? START_PATH : '/var';
 
 // Обработка запросов
 try {
     // Обработка GET запросов
-    if ($_SERVER['REQUEST_METHOD'] === 'GET') {
-        if (isset($_GET['action'])) {
-            $action = $_GET['action'];
-            
-            switch ($action) {
-                case 'select_server':
-                    $serverName = $_GET['server'] ?? '';
-                    if ($serverName) {
-                        $_SESSION['current_server'] = $serverName;
-                        $_SESSION['current_path'] = '/';
-                        $currentServer = $serverName;
-                        $currentPath = '/';
-                    }
-                    break;
+    if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action'])) {
+        $action = $_GET['action'];
+        
+        switch ($action) {
+            case 'select_server':
+                $serverName = $_GET['server'] ?? '';
+                if ($serverName) {
+                    $_SESSION['current_server'] = $serverName;
+                    $_SESSION['current_path'] = $startPath;
+                    $currentServer = $serverName;
+                    $currentPath = $startPath;
                     
-                case 'browse':
-                    $serverName = $_GET['server'] ?? $_SESSION['current_server'] ?? '';
-                    $path = $_GET['path'] ?? '/';
+                    // Редирект
+                    header('Location: index.php');
+                    exit;
+                }
+                break;
+                
+            case 'browse':
+                $serverName = $_GET['server'] ?? $_SESSION['current_server'] ?? '';
+                $path = $_GET['path'] ?? $startPath;
+                
+                if ($serverName) {
+                    $_SESSION['current_server'] = $serverName;
+                    $_SESSION['current_path'] = $path;
+                    $currentServer = $serverName;
+                    $currentPath = $path;
                     
-                    if ($serverName) {
-                        $_SESSION['current_server'] = $serverName;
-                        $_SESSION['current_path'] = $path;
-                        $currentServer = $serverName;
-                        $currentPath = $path;
-                        
-                        // Для AJAX запросов возвращаем только содержимое
-                        if (isset($_GET['ajax'])) {
-                            $ssh = new SSHManager($serverName);
-                            $ssh->connect();
-                            $listing = $ssh->listDirectory($path);
-                            
-                            // Формируем HTML для файлового браузера
-                            $html = renderFileBrowser($listing, $serverName);
-                            echo $html;
-                            exit;
-                        }
-                    }
-                    break;
-                    
-                case 'view_file':
-                    $serverName = $_GET['server'] ?? $_SESSION['current_server'] ?? '';
-                    $filePath = $_GET['file_path'] ?? '';
-                    
-                    if ($serverName && $filePath) {
-                        $ssh = new SSHManager($serverName);
-                        $ssh->connect();
-                        
-                        $fileData = $ssh->readFile($filePath);
-                        $currentView = 'file';
-                        $fileContent = $fileData;
-                        
-                        $_SESSION['current_file'] = $filePath;
-                        $_SESSION['current_server'] = $serverName;
-                        $_SESSION['current_path'] = dirname($filePath);
-                        
-                        $currentServer = $serverName;
-                        $currentPath = dirname($filePath);
-                    }
-                    break;
-                    
-                case 'get_tree':
-                    $serverName = $_GET['server'] ?? '';
-                    $path = $_GET['path'] ?? '/';
-                    
-                    if ($serverName) {
+                    // Для AJAX запросов возвращаем только содержимое
+                    if (isset($_GET['ajax'])) {
                         $ssh = new SSHManager($serverName);
                         $ssh->connect();
                         $listing = $ssh->listDirectory($path);
                         
-                        // Формируем данные для дерева
-                        $tree = [
-                            'path' => $path,
-                            'name' => basename($path) ?: '/',
-                            'type' => 'directory',
-                            'children' => []
-                        ];
-                        
-                        $lines = explode("\n", $listing['listing']);
-                        foreach ($lines as $line) {
-                            if (empty($line) || strpos($line, 'total ') === 0) continue;
-                            
-                            $parts = preg_split('/\s+/', $line, 9);
-                            if (count($parts) < 9) continue;
-                            
-                            $perms = $parts[0];
-                            $isDir = $perms[0] === 'd';
-                            $name = $parts[8];
-                            
-                            if ($name === '.' || $name === '..') continue;
-                            
-                            // Формируем правильный путь
-                            $fullPath = ($path === '/') ? '/' . $name : $path . '/' . $name;
-                            error_log("Tree item: name='{$name}', path='{$fullPath}', isDir=" . ($isDir ? 'true' : 'false'));
-                            
-                            if ($isDir) {
-                                $tree['children'][] = [
-                                    'path' => $fullPath,
-                                    'name' => $name,
-                                    'type' => 'directory',
-                                    'children' => []
-                                ];
-                            } else {
-                                $tree['children'][] = [
-                                    'path' => $fullPath,
-                                    'name' => $name,
-                                    'type' => 'file',
-                                    'size' => $parts[4],
-                                    'icon' => getFileIcon($name, false)
-                                ];
-                            }
-                        }
-                        
-                        header('Content-Type: application/json');
-                        echo json_encode($tree);
+                        // Формируем HTML для файлового браузера
+                        $html = renderFileBrowser($listing, $serverName);
+                        echo $html;
                         exit;
                     }
-                    break;
-            }
+                }
+                break;
+                
+            case 'view_file':
+                $serverName = $_GET['server'] ?? $_SESSION['current_server'] ?? '';
+                $filePath = $_GET['file_path'] ?? '';
+                
+                if ($serverName && $filePath) {
+                    $ssh = new SSHManager($serverName);
+                    $ssh->connect();
+                    
+                    $fileData = $ssh->readFile($filePath);
+                    $currentView = 'file';
+                    $fileContent = $fileData;
+                    
+                    $_SESSION['current_file'] = $filePath;
+                    $_SESSION['current_server'] = $serverName;
+                    $_SESSION['current_path'] = dirname($filePath);
+                    
+                    $currentServer = $serverName;
+                    $currentPath = dirname($filePath);
+                }
+                break;
+                
+            case 'get_tree':
+                $serverName = $_GET['server'] ?? '';
+                $path = $_GET['path'] ?? $startPath;
+                
+                if ($serverName) {
+                    $ssh = new SSHManager($serverName);
+                    $ssh->connect();
+                    $listing = $ssh->listDirectory($path);
+                    
+                    // Формируем данные для дерева
+                    $tree = [
+                        'path' => $path,
+                        'name' => basename($path) ?: $path,
+                        'type' => 'directory',
+                        'children' => []
+                    ];
+                    
+                    $lines = explode("\n", $listing['listing']);
+                    foreach ($lines as $line) {
+                        if (empty($line) || strpos($line, 'total ') === 0) continue;
+                        
+                        $parts = preg_split('/\s+/', $line, 9);
+                        if (count($parts) < 9) continue;
+                        
+                        $perms = $parts[0];
+                        $isDir = $perms[0] === 'd';
+                        $name = $parts[8];
+                        
+                        if ($name === '.' || $name === '..') continue;
+                        
+                        // Формируем правильный путь
+                        $fullPath = ($path === '/') ? '/' . $name : $path . '/' . $name;
+                        
+                        if ($isDir) {
+                            $tree['children'][] = [
+                                'path' => $fullPath,
+                                'name' => $name,
+                                'type' => 'directory',
+                                'children' => []
+                            ];
+                        } else {
+                            $tree['children'][] = [
+                                'path' => $fullPath,
+                                'name' => $name,
+                                'type' => 'file',
+                                'size' => $parts[4],
+                                'icon' => getFileIcon($name, false)
+                            ];
+                        }
+                    }
+                    
+                    header('Content-Type: application/json');
+                    echo json_encode($tree);
+                    exit;
+                }
+                break;
         }
     }
     
 } catch (Exception $e) {
     $currentView = 'error';
     $errorMessage = "Ошибка: " . $e->getMessage();
-    error_log("SSH Browser Error: " . $e->getMessage());
 }
 
 // Получаем список серверов
@@ -160,7 +162,7 @@ function renderFileBrowser($listing, $serverName) {
     $html = '<div class="file-grid">';
     
     // Кнопка "Наверх" если не корень
-    if ($listing['current_path'] !== '/') {
+    if ($listing['current_path'] !== '/' && $listing['current_path'] !== '/var') {
         $parentPath = dirname($listing['current_path']);
         $html .= '
         <a href="?action=browse&server=' . urlencode($serverName) . '&path=' . urlencode($parentPath) . '" class="file-item">
@@ -185,7 +187,6 @@ function renderFileBrowser($listing, $serverName) {
         
         // Формируем правильный путь
         $fullPath = ($listing['current_path'] === '/') ? '/' . $name : $listing['current_path'] . '/' . $name;
-        error_log("File browser item: name='{$name}', path='{$fullPath}', current='{$listing['current_path']}'");
         
         if ($isDir) {
             $html .= '
@@ -268,19 +269,21 @@ if (isset($_GET['ajax'])) {
         }
         
         .server-item {
+            display: block;
             padding: 8px 12px;
             background: #4a5568;
             border-radius: 5px;
             margin-bottom: 5px;
             cursor: pointer;
             transition: background 0.3s;
-            display: flex;
-            align-items: center;
-            gap: 8px;
+            text-decoration: none;
+            color: white;
         }
         
         .server-item:hover {
             background: #667eea;
+            text-decoration: none;
+            color: white;
         }
         
         .server-item.active {
@@ -291,83 +294,6 @@ if (isset($_GET['ajax'])) {
             flex: 1;
             overflow-y: auto;
             padding: 15px;
-        }
-        
-        /* Стили для дерева */
-        .tree {
-            list-style: none;
-            padding-left: 0;
-        }
-        
-        .tree-node {
-            margin-bottom: 2px;
-        }
-        
-        .tree-link {
-            display: flex;
-            align-items: center;
-            padding: 6px 8px;
-            border-radius: 4px;
-            cursor: pointer;
-            transition: background 0.2s;
-            user-select: none;
-            text-decoration: none;
-            color: inherit;
-            width: 100%;
-        }
-        
-        .tree-link:hover {
-            background: #edf2f7;
-            text-decoration: none;
-        }
-        
-        .tree-link.active {
-            background: #e2e8f0;
-            font-weight: bold;
-        }
-        
-        .tree-icon {
-            width: 20px;
-            text-align: center;
-            margin-right: 6px;
-            font-size: 14px;
-        }
-        
-        .tree-arrow {
-            width: 16px;
-            text-align: center;
-            margin-right: 4px;
-            transition: transform 0.2s;
-            font-size: 10px;
-            cursor: pointer;
-            user-select: none;
-        }
-        
-        .tree-arrow.expanded {
-            transform: rotate(90deg);
-        }
-        
-        .tree-name {
-            flex: 1;
-            font-size: 14px;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-        
-        .tree-size {
-            font-size: 12px;
-            color: #718096;
-            margin-left: 8px;
-        }
-        
-        .tree-children {
-            margin-left: 20px;
-            display: none;
-        }
-        
-        .tree-children.expanded {
-            display: block;
         }
         
         /* Основная панель */
@@ -554,6 +480,51 @@ if (isset($_GET['ajax'])) {
             color: #4a5568;
         }
         
+        /* Простое дерево */
+        .simple-tree {
+            list-style: none;
+            padding-left: 0;
+        }
+        
+        .simple-tree-item {
+            padding: 5px 10px;
+            cursor: pointer;
+            border-radius: 4px;
+            margin-bottom: 2px;
+            display: flex;
+            align-items: center;
+        }
+        
+        .simple-tree-item:hover {
+            background: #edf2f7;
+        }
+        
+        .tree-arrow {
+            width: 20px;
+            text-align: center;
+            cursor: pointer;
+            user-select: none;
+        }
+        
+        .tree-icon {
+            margin-right: 5px;
+            width: 20px;
+            text-align: center;
+        }
+        
+        .tree-name {
+            flex: 1;
+        }
+        
+        .tree-children {
+            margin-left: 20px;
+            display: none;
+        }
+        
+        .tree-children.expanded {
+            display: block;
+        }
+        
         /* Загрузчик */
         .loader {
             display: inline-block;
@@ -596,7 +567,7 @@ if (isset($_GET['ajax'])) {
                         <a href="?action=select_server&server=<?php echo urlencode($server); ?>" 
                            class="server-item <?php echo $currentServer === $server ? 'active' : ''; ?>">
                             <i class="fas fa-server"></i>
-                            <span><?php echo escapeOutput($server); ?></span>
+                            <?php echo escapeOutput($server); ?>
                         </a>
                     <?php endforeach; ?>
                 </div>
@@ -610,7 +581,12 @@ if (isset($_GET['ajax'])) {
             
             <div class="tree-container" id="treeContainer">
                 <?php if ($currentServer): ?>
-                    <div id="serverTree"></div>
+                    <div id="serverTree">
+                        <div style="text-align: center; padding: 20px;">
+                            <div class="loader"></div>
+                            <p>Загрузка дерева...</p>
+                        </div>
+                    </div>
                 <?php else: ?>
                     <div class="welcome">
                         <i class="fas fa-mouse-pointer" style="font-size: 48px; color: #a0aec0; margin-bottom: 20px;"></i>
@@ -624,7 +600,7 @@ if (isset($_GET['ajax'])) {
         <div class="main-panel">
             <div class="main-header">
                 <?php if ($currentPath && $currentServer): ?>
-                    <?php if ($currentPath !== '/'): ?>
+                    <?php if ($currentPath !== $startPath): ?>
                         <a href="?action=browse&server=<?php echo urlencode($currentServer); ?>&path=<?php echo urlencode(dirname($currentPath)); ?>" class="back-btn">
                             <i class="fas fa-arrow-left"></i> Назад
                         </a>
@@ -725,17 +701,16 @@ if (isset($_GET['ajax'])) {
     </div>
     
     <script>
-        // Инициализация при загрузке страницы
+        // Упрощенная версия JavaScript
         document.addEventListener('DOMContentLoaded', function() {
             const currentServer = '<?php echo escapeOutput($currentServer); ?>';
             const currentPath = '<?php echo escapeOutput($currentPath); ?>';
             
-            console.log('Current server:', currentServer);
-            console.log('Current path:', currentPath);
+            console.log('Initializing... Server:', currentServer, 'Path:', currentPath);
             
             if (currentServer) {
-                // Загружаем дерево для текущего сервера
-                loadTree(currentServer, '/');
+                // Загружаем дерево для /var
+                loadTree(currentServer, '<?php echo $startPath; ?>');
                 
                 // Загружаем содержимое текущей директории
                 if (currentPath) {
@@ -743,182 +718,70 @@ if (isset($_GET['ajax'])) {
                 }
             }
         });
-        
-        // Загрузка дерева
-        async function loadTree(server, path = '/') {
-            const treeContainer = document.getElementById('serverTree');
-            if (!treeContainer) {
-                console.error('Tree container not found');
-                return;
-            }
-            
-            treeContainer.innerHTML = '<div style="padding: 20px; text-align: center;"><div class="loader"></div> Загрузка дерева...</div>';
-            
-            try {
-                console.log('Loading tree for server:', server, 'path:', path);
-                const response = await fetch(`?action=get_tree&server=${encodeURIComponent(server)}&path=${encodeURIComponent(path)}&ajax=1`);
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                
-                const data = await response.json();
-                console.log('Tree data received:', data);
-                
-                if (!data || typeof data !== 'object') {
-                    throw new Error('Invalid tree data received');
-                }
-                
-                renderTree(treeContainer, data, server);
-            } catch (error) {
-                console.error('Error loading tree:', error);
-                treeContainer.innerHTML = `<div class="error">Ошибка загрузки дерева: ${error.message}</div>`;
-            }
-        }
-        
-        // Отрисовка дерева
-        function renderTree(container, node, server) {
-            console.log('Rendering tree, node:', node);
-            
-            container.innerHTML = '';
-            
-            const ul = document.createElement('ul');
-            ul.className = 'tree';
-            
-            // Создаем корневой элемент
-            const rootLi = document.createElement('li');
-            rootLi.className = 'tree-node';
-            
-            const rootDiv = document.createElement('div');
-            rootDiv.className = 'tree-link';
-            rootDiv.onclick = () => {
-                console.log('Root clicked, navigating to /');
-                window.location.href = `?action=browse&server=${encodeURIComponent(server)}&path=/`;
-            };
-            
-            const rootIcon = document.createElement('span');
-            rootIcon.className = 'tree-icon';
-            rootIcon.innerHTML = '📁';
-            
-            const rootName = document.createElement('span');
-            rootName.className = 'tree-name';
-            rootName.textContent = '/';
-            
-            rootDiv.appendChild(rootIcon);
-            rootDiv.appendChild(rootName);
-            rootLi.appendChild(rootDiv);
-            ul.appendChild(rootLi);
-            
-            // Рендерим дочерние элементы, если они есть
-            if (node.children && Array.isArray(node.children) && node.children.length > 0) {
-                console.log('Rendering', node.children.length, 'children');
-                
-                const childrenContainer = document.createElement('div');
-                childrenContainer.className = 'tree-children expanded';
-                
-                node.children.forEach(child => {
-                    console.log('Creating child:', child);
-                    try {
-                        const childElement = createTreeItem(child, server);
-                        childrenContainer.appendChild(childElement);
-                    } catch (error) {
-                        console.error('Error creating tree item:', error, 'child:', child);
-                    }
-                });
-                
-                rootLi.appendChild(childrenContainer);
-            } else {
-                console.log('No children to render');
-            }
-            
-            container.appendChild(ul);
-        }
-        
-        // Создание элемента дерева
-        function createTreeItem(item, server) {
-            console.log('Creating tree item:', item);
-            
-            if (!item || typeof item !== 'object') {
-                throw new Error('Invalid item data');
-            }
-            
+
+        // Функция создания элемента дерева (должна быть глобальной)
+        window.createTreeElement = function(item, server) {
             const li = document.createElement('li');
-            li.className = 'tree-node';
             
             const div = document.createElement('div');
-            div.className = 'tree-link';
-            div.dataset.path = item.path || '';
-            div.dataset.type = item.type || '';
+            div.className = 'simple-tree-item';
+            div.dataset.path = item.path;
+            div.dataset.type = item.type;
             
             // Стрелка для директорий
             if (item.type === 'directory') {
                 const arrow = document.createElement('span');
                 arrow.className = 'tree-arrow';
                 arrow.innerHTML = '▶';
-                arrow.onclick = (e) => {
-                    e.preventDefault();
+                arrow.onclick = function(e) {
                     e.stopPropagation();
-                    console.log('Arrow clicked for directory:', item.path);
-                    toggleDirectory(item, arrow, li, server);
+                    toggleSimpleDirectory(item, arrow, li, server);
                 };
                 div.appendChild(arrow);
             } else {
                 const spacer = document.createElement('span');
                 spacer.className = 'tree-arrow';
-                spacer.style.visibility = 'hidden';
+                spacer.innerHTML = '&nbsp;';
                 div.appendChild(spacer);
             }
             
             // Иконка
             const icon = document.createElement('span');
             icon.className = 'tree-icon';
-            if (item.type === 'directory') {
-                icon.innerHTML = '📁';
-            } else {
-                icon.innerHTML = item.icon || '📄';
-            }
+            icon.innerHTML = item.type === 'directory' ? '📁' : (item.icon || '📄');
             div.appendChild(icon);
             
             // Имя
             const name = document.createElement('span');
             name.className = 'tree-name';
-            name.textContent = item.name || 'unnamed';
-            name.title = item.path || '';
+            name.textContent = item.name;
+            name.title = item.path;
+            
+            // Для файлов - делаем кликабельным
+            if (item.type === 'file') {
+                name.style.cursor = 'pointer';
+                name.style.color = '#3182ce';
+                name.onclick = function() {
+                    console.log('Opening file:', item.path);
+                    window.location.href = `?action=view_file&server=${encodeURIComponent(server)}&file_path=${encodeURIComponent(item.path)}`;
+                };
+            }
+            
             div.appendChild(name);
             
             // Размер для файлов
             if (item.type === 'file' && item.size) {
                 const size = document.createElement('span');
-                size.className = 'tree-size';
-                const bytes = parseInt(item.size) || 0;
-                size.textContent = formatSize(bytes);
+                size.style.fontSize = '11px';
+                size.style.color = '#718096';
+                size.style.marginLeft = '8px';
+                size.textContent = formatSize(item.size);
                 div.appendChild(size);
             }
             
-            // Обработчик клика
-            div.onclick = (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                
-                console.log('Item clicked:', item);
-                
-                if (item.type === 'file') {
-                    // Файл - открываем для просмотра
-                    console.log('Opening file:', item.path);
-                    window.location.href = `?action=view_file&server=${encodeURIComponent(server)}&file_path=${encodeURIComponent(item.path)}`;
-                } else if (item.type === 'directory') {
-                    // Папка - раскрываем в дереве
-                    console.log('Toggling directory:', item.path);
-                    const arrow = div.querySelector('.tree-arrow');
-                    if (arrow) {
-                        toggleDirectory(item, arrow, li, server);
-                    }
-                }
-            };
-            
             li.appendChild(div);
             
-            // Контейнер для дочерних элементов (только для директорий)
+            // Контейнер для дочерних элементов
             if (item.type === 'directory') {
                 const childrenContainer = document.createElement('div');
                 childrenContainer.className = 'tree-children';
@@ -926,23 +789,63 @@ if (isset($_GET['ajax'])) {
             }
             
             return li;
-        }
-        
-        // Переключение директории
-        async function toggleDirectory(item, arrow, li, server) {
-            console.log('toggleDirectory called for:', item.path);
+        };
+
+        // Загрузка дерева
+        async function loadTree(server, path) {
+            const treeContainer = document.getElementById('serverTree');
+            if (!treeContainer) return;
             
-            const childrenContainer = li.querySelector('.tree-children');
-            if (!childrenContainer) {
-                console.error('Children container not found');
-                return;
+            console.log('Loading tree for path:', path);
+            
+            try {
+                const response = await fetch(`?action=get_tree&server=${encodeURIComponent(server)}&path=${encodeURIComponent(path)}&ajax=1`);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                console.log('Tree data:', data);
+                
+                // Рендерим простое дерево
+                renderSimpleTree(treeContainer, data, server);
+                
+            } catch (error) {
+                console.error('Error loading tree:', error);
+                treeContainer.innerHTML = `<div class="error">Ошибка загрузки дерева: ${error.message}</div>`;
+            }
+        }
+
+        // Отрисовка простого дерева
+        function renderSimpleTree(container, node, server) {
+            container.innerHTML = '';
+            
+            const ul = document.createElement('ul');
+            ul.className = 'simple-tree';
+            
+            // Рендерим детей
+            if (node.children && node.children.length > 0) {
+                node.children.forEach(child => {
+                    ul.appendChild(window.createTreeElement(child, server));
+                });
+            } else {
+                const li = document.createElement('li');
+                li.style.padding = '10px';
+                li.style.color = '#718096';
+                li.textContent = 'Нет файлов или папок';
+                ul.appendChild(li);
             }
             
+            container.appendChild(ul);
+        }
+
+        // Переключение директории в простом дереве
+        async function toggleSimpleDirectory(item, arrow, li, server) {
+            const childrenContainer = li.querySelector('.tree-children');
             const isExpanded = childrenContainer.classList.contains('expanded');
-            console.log('Is expanded:', isExpanded);
             
             if (isExpanded) {
-                // Скрываем
                 arrow.innerHTML = '▶';
                 childrenContainer.classList.remove('expanded');
                 childrenContainer.innerHTML = '';
@@ -950,45 +853,32 @@ if (isset($_GET['ajax'])) {
             }
             
             // Показываем загрузку
-            arrow.innerHTML = '<div class="loader" style="display: inline-block; width: 12px; height: 12px;"></div>';
+            arrow.innerHTML = '<span class="loader" style="width: 12px; height: 12px; display: inline-block;"></span>';
             
             try {
-                console.log('Loading directory contents for:', item.path);
                 const response = await fetch(`?action=get_tree&server=${encodeURIComponent(server)}&path=${encodeURIComponent(item.path)}&ajax=1`);
                 
                 if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    throw new Error(`HTTP error: ${response.status}`);
                 }
                 
                 const data = await response.json();
-                console.log('Directory data received:', data);
                 
                 arrow.innerHTML = '▼';
                 childrenContainer.classList.add('expanded');
                 
-                // Очищаем контейнер
-                childrenContainer.innerHTML = '';
-                
-                if (data.children && Array.isArray(data.children) && data.children.length > 0) {
-                    console.log('Rendering', data.children.length, 'child items');
-                    
-                    // Создаем контейнер для дочерних элементов
-                    const childUl = document.createElement('ul');
-                    childUl.className = 'tree';
-                    childUl.style.marginLeft = '10px';
+                if (data.children && data.children.length > 0) {
+                    const ul = document.createElement('ul');
+                    ul.className = 'simple-tree';
+                    ul.style.marginLeft = '20px';
                     
                     data.children.forEach(child => {
-                        try {
-                            const childElement = createTreeItem(child, server);
-                            childUl.appendChild(childElement);
-                        } catch (error) {
-                            console.error('Error creating child item:', error, 'child:', child);
-                        }
+                        const childElement = window.createTreeElement(child, server);
+                        ul.appendChild(childElement);
                     });
                     
-                    childrenContainer.appendChild(childUl);
+                    childrenContainer.appendChild(ul);
                 } else {
-                    console.log('Directory is empty');
                     const emptyMsg = document.createElement('div');
                     emptyMsg.style.padding = '5px 10px';
                     emptyMsg.style.color = '#718096';
@@ -996,6 +886,7 @@ if (isset($_GET['ajax'])) {
                     emptyMsg.textContent = 'Папка пуста';
                     childrenContainer.appendChild(emptyMsg);
                 }
+                
             } catch (error) {
                 console.error('Error loading directory:', error);
                 arrow.innerHTML = '▶';
@@ -1004,68 +895,53 @@ if (isset($_GET['ajax'])) {
                 errorMsg.style.padding = '5px 10px';
                 errorMsg.style.color = '#e53e3e';
                 errorMsg.style.fontSize = '12px';
-                errorMsg.textContent = 'Ошибка загрузки: ' + error.message;
+                errorMsg.textContent = 'Ошибка загрузки';
                 childrenContainer.appendChild(errorMsg);
             }
         }
-        
+
         // Загрузка содержимого директории
         function loadDirectory(server, path) {
             const browser = document.getElementById('fileBrowser');
-            if (!browser) {
-                console.error('File browser container not found');
-                return;
-            }
+            if (!browser) return;
             
-            console.log('Loading directory for main view:', server, path);
-            browser.innerHTML = '<div style="text-align: center; padding: 40px;"><div class="loader"></div> Загрузка файлов...</div>';
+            console.log('Loading directory:', path);
             
             fetch(`?action=browse&server=${encodeURIComponent(server)}&path=${encodeURIComponent(path)}&ajax=1`)
                 .then(response => {
                     if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
+                        throw new Error(`HTTP error: ${response.status}`);
                     }
                     return response.text();
                 })
                 .then(html => {
-                    console.log('Directory HTML received, length:', html.length);
                     browser.innerHTML = html;
                     
                     // Обновляем путь в заголовке
-                    updatePathDisplay(path);
+                    const pathDisplay = document.getElementById('currentPath');
+                    if (pathDisplay) {
+                        pathDisplay.innerHTML = `<i class="fas fa-folder"></i> ${path}`;
+                    }
                 })
                 .catch(error => {
                     console.error('Error loading directory:', error);
                     browser.innerHTML = `<div class="error">Ошибка загрузки: ${error.message}</div>`;
                 });
         }
-        
-        // Обновление отображения пути
-        function updatePathDisplay(path) {
-            const pathDisplay = document.getElementById('currentPath');
-            if (pathDisplay) {
-                pathDisplay.innerHTML = `<i class="fas fa-folder"></i> ${path}`;
-            }
-        }
-        
+
         // Форматирование размера файла
         function formatSize(bytes) {
             if (!bytes || bytes === 0 || isNaN(bytes)) return '0 B';
             
+            bytes = parseInt(bytes);
             const k = 1024;
             const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+            
+            if (bytes < k) return bytes + ' B';
+            
             const i = Math.floor(Math.log(bytes) / Math.log(k));
-            
-            // Проверяем индекс на валидность
-            if (i < 0 || i >= sizes.length) {
-                return bytes + ' B';
-            }
-            
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+            return (bytes / Math.pow(k, i)).toFixed(2) + ' ' + sizes[i];
         }
-        
-        // Добавим обработку ошибок формата размера
-        window.formatSize = formatSize;
     </script>
 </body>
 </html>
