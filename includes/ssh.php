@@ -92,26 +92,74 @@ class SSHManager {
             throw new Exception("Файл не найден или это директория");
         }
         
-        // Определяем тип файла и читаем соответствующим образом
+        // Определяем тип файла через file -bI
         $fileType = trim($this->executeCommand(
-            "file -b " . escapeshellarg($path)
+            "file -bI " . escapeshellarg($path) . " 2>/dev/null || file -b " . escapeshellarg($path)
         ));
         
-        if (stripos($fileType, 'text') !== false || 
-            stripos($fileType, 'script') !== false ||
-            stripos($fileType, 'empty') !== false) {
-            
+        // Убираем charset из вывода
+        $fileType = preg_replace('/; charset=.*$/', '', $fileType);
+        
+        // Получаем расширение файла
+        $filename = basename($path);
+        $extension = getFileExtension($filename);
+        
+        // Проверяем, является ли файл текстовым
+        $isText = false;
+        
+        // 1. Проверяем по расширению
+        if (isTextFile($filename)) {
+            $isText = true;
+        }
+        // 2. Проверяем по выводу file
+        elseif (stripos($fileType, 'text') !== false || 
+                stripos($fileType, 'script') !== false ||
+                stripos($fileType, 'empty') !== false ||
+                stripos($fileType, 'json') !== false ||
+                stripos($fileType, 'xml') !== false) {
+            $isText = true;
+        }
+        // 3. Проверяем, не является ли бинарным
+        elseif (isBinaryFile($fileType)) {
+            $isText = false;
+        }
+        // 4. Если не уверены, пробуем прочитать первые несколько байт
+        else {
+            $firstBytes = trim($this->executeCommand(
+                "head -c 1024 " . escapeshellarg($path) . " | file -b -"
+            ));
+            if (stripos($firstBytes, 'text') !== false) {
+                $isText = true;
+            }
+        }
+        
+        if ($isText) {
             // Текстовый файл - читаем содержимое
             $content = $this->executeCommand("cat " . escapeshellarg($path));
             
+            // Проверяем кодировку
+            $encoding = trim($this->executeCommand(
+                "file -b --mime-encoding " . escapeshellarg($path) . " 2>/dev/null || echo 'binary'"
+            ));
+            
+            // Если не UTF-8, пробуем конвертировать
+            if ($encoding !== 'utf-8' && $encoding !== 'us-ascii' && $encoding !== 'binary') {
+                $content = mb_convert_encoding($content, 'UTF-8', $encoding);
+            }
+            
             // Получаем размер файла
             $size = trim($this->executeCommand("stat -c%s " . escapeshellarg($path)));
+            
+            // Получаем количество строк
+            $lines = trim($this->executeCommand("wc -l < " . escapeshellarg($path)));
             
             return [
                 'type' => 'text',
                 'content' => $content,
                 'file_type' => $fileType,
+                'encoding' => $encoding,
                 'size' => $size,
+                'lines' => $lines,
                 'path' => $path
             ];
         } else {

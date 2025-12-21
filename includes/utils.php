@@ -10,6 +10,7 @@ function formatSize($bytes) {
 }
 
 function formatPermissions($perms) {
+    if (!is_numeric($perms)) return $perms;
     $symbolic = '';
     $symbolic .= ($perms & 0x0400) ? 'r' : '-';
     $symbolic .= ($perms & 0x0200) ? 'w' : '-';
@@ -23,16 +24,42 @@ function formatPermissions($perms) {
     return $symbolic;
 }
 
-function isImageFile($filename) {
-    $imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'];
-    $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
-    return in_array($ext, $imageExtensions);
-}
-
 function isTextFile($filename) {
-    $textExtensions = ['txt', 'php', 'js', 'css', 'html', 'htm', 'json', 'xml', 'yml', 'yaml', 'md', 'log', 'conf', 'ini'];
+    $textExtensions = [
+        'txt', 'php', 'js', 'css', 'html', 'htm', 'json', 'xml', 
+        'yml', 'yaml', 'md', 'log', 'conf', 'ini', 'env', 'sh', 
+        'bash', 'zsh', 'py', 'rb', 'java', 'c', 'cpp', 'h', 'hpp',
+        'sql', 'csv', 'tsv', 'xml', 'xsl', 'xslt', 'xsd',
+        'toml', 'cfg', 'properties', 'gitignore', 'dockerfile'
+    ];
     $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
     return in_array($ext, $textExtensions);
+}
+
+function isBinaryFile($fileType) {
+    $binaryIndicators = [
+        'executable',
+        'binary',
+        'compressed',
+        'archive',
+        'image',
+        'pdf',
+        'microsoft',
+        'msword',
+        'excel',
+        'powerpoint',
+        'audio',
+        'video',
+        'octet-stream'
+    ];
+    
+    $fileType = strtolower($fileType);
+    foreach ($binaryIndicators as $indicator) {
+        if (strpos($fileType, $indicator) !== false) {
+            return true;
+        }
+    }
+    return false;
 }
 
 function getFileIcon($filename, $isDir = false) {
@@ -42,12 +69,16 @@ function getFileIcon($filename, $isDir = false) {
     
     $icons = [
         'php' => '🐘', 'js' => '📜', 'html' => '🌐', 'css' => '🎨',
-        'jpg' => '🖼️', 'jpeg' => '🖼️', 'png' => '🖼️', 'gif' => '🖼️',
-        'pdf' => '📕', 'doc' => '📄', 'docx' => '📄',
-        'zip' => '📦', 'tar' => '📦', 'gz' => '📦',
-        'txt' => '📝', 'md' => '📝',
-        'json' => '{}', 'xml' => '</>',
-        'sql' => '🗃️', 'log' => '📋'
+        'jpg' => '🖼️', 'jpeg' => '🖼️', 'png' => '🖼️', 'gif' => '🖼️', 'svg' => '🖼️', 'bmp' => '🖼️', 'webp' => '🖼️',
+        'pdf' => '📕', 'doc' => '📄', 'docx' => '📄', 'odt' => '📄',
+        'xls' => '📊', 'xlsx' => '📊', 'ods' => '📊',
+        'zip' => '📦', 'tar' => '📦', 'gz' => '📦', '7z' => '📦', 'rar' => '📦',
+        'txt' => '📝', 'md' => '📝', 'rtf' => '📝',
+        'json' => '{}', 'xml' => '</>', 'yaml' => '⚙️', 'yml' => '⚙️',
+        'sql' => '🗃️', 'log' => '📋', 'ini' => '⚙️', 'conf' => '⚙️',
+        'sh' => '🐚', 'bash' => '🐚', 'zsh' => '🐚',
+        'py' => '🐍', 'rb' => '💎', 'java' => '☕', 'c' => '📟', 'cpp' => '📟',
+        'mp3' => '🎵', 'wav' => '🎵', 'mp4' => '🎬', 'avi' => '🎬'
     ];
     
     return $icons[$ext] ?? '📄';
@@ -55,4 +86,8 @@ function getFileIcon($filename, $isDir = false) {
 
 function escapeOutput($string) {
     return htmlspecialchars($string, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+}
+
+function getFileExtension($filename) {
+    return strtolower(pathinfo($filename, PATHINFO_EXTENSION));
 }
