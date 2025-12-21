@@ -73,6 +73,15 @@ try {
                     $ssh->connect();
                     
                     $fileData = $ssh->readFile($filePath);
+                    
+                    // Для AJAX запросов возвращаем только содержимое файла
+                    if (isset($_GET['ajax'])) {
+                        // Формируем HTML для отображения файла
+                        $html = renderFileContent($fileData, $serverName);
+                        echo $html;
+                        exit;
+                    }
+                    
                     $currentView = 'file';
                     $fileContent = $fileData;
                     
@@ -761,9 +770,11 @@ if (isset($_GET['ajax'])) {
             if (item.type === 'file') {
                 name.style.cursor = 'pointer';
                 name.style.color = '#3182ce';
-                name.onclick = function() {
+                name.onclick = function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
                     console.log('Opening file:', item.path);
-                    window.location.href = `?action=view_file&server=${encodeURIComponent(server)}&file_path=${encodeURIComponent(item.path)}`;
+                    loadFileContent(server, item.path, item.name);
                 };
             }
             
@@ -790,6 +801,117 @@ if (isset($_GET['ajax'])) {
             
             return li;
         };
+
+        // Загрузка содержимого файла через AJAX
+        async function loadFileContent(server, filePath, fileName) {
+            console.log('Loading file content:', filePath);
+            
+            // Показываем загрузку в основном окне
+            const contentArea = document.getElementById('contentArea');
+            const fileBrowser = document.getElementById('fileBrowser');
+            
+            if (fileBrowser) {
+                fileBrowser.style.display = 'none';
+            }
+            
+            // Создаем или получаем контейнер для файла
+            let fileContainer = document.getElementById('fileContentContainer');
+            if (!fileContainer) {
+                fileContainer = document.createElement('div');
+                fileContainer.id = 'fileContentContainer';
+                contentArea.appendChild(fileContainer);
+            }
+            
+            // Показываем загрузку
+            fileContainer.innerHTML = `
+                <div style="text-align: center; padding: 40px;">
+                    <div class="loader"></div> 
+                    <p>Загрузка файла...</p>
+                </div>
+            `;
+            fileContainer.style.display = 'block';
+            
+            try {
+                // Загружаем содержимое файла через AJAX
+                const response = await fetch(`?action=view_file&server=${encodeURIComponent(server)}&file_path=${encodeURIComponent(filePath)}&ajax=1`);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error: ${response.status}`);
+                }
+                
+                const html = await response.text();
+                fileContainer.innerHTML = html;
+                
+                // Обновляем путь в заголовке
+                const pathDisplay = document.getElementById('currentPath');
+                if (pathDisplay) {
+                    pathDisplay.innerHTML = `<i class="fas fa-file"></i> ${filePath}`;
+                }
+                
+                // Показываем кнопку "Назад к списку"
+                const backButton = document.querySelector('.main-header .back-btn');
+                if (backButton) {
+                    backButton.style.visibility = 'visible';
+                    backButton.href = `?action=browse&server=${encodeURIComponent(server)}&path=${encodeURIComponent(dirname(filePath))}`;
+                    backButton.onclick = function(e) {
+                        e.preventDefault();
+                        showFileBrowser(server, dirname(filePath));
+                    };
+                }
+                
+            } catch (error) {
+                console.error('Error loading file:', error);
+                fileContainer.innerHTML = `
+                    <div class="error">
+                        <h3>Ошибка загрузки файла</h3>
+                        <p>${error.message}</p>
+                        <button onclick="showFileBrowser('${server}', '${dirname(filePath)}')" class="back-btn">
+                            <i class="fas fa-arrow-left"></i> Назад к списку файлов
+                        </button>
+                    </div>
+                `;
+            }
+        }
+
+        // Функция для получения директории из пути
+        function dirname(path) {
+            return path.split('/').slice(0, -1).join('/') || '/';
+        }
+
+        // Показать файловый браузер
+        function showFileBrowser(server, path) {
+            console.log('Showing file browser for path:', path);
+            
+            // Скрываем контейнер с файлом
+            const fileContainer = document.getElementById('fileContentContainer');
+            if (fileContainer) {
+                fileContainer.style.display = 'none';
+            }
+            
+            // Показываем файловый браузер
+            const fileBrowser = document.getElementById('fileBrowser');
+            if (fileBrowser) {
+                fileBrowser.style.display = 'block';
+                loadDirectory(server, path);
+            }
+            
+            // Обновляем путь в заголовке
+            const pathDisplay = document.getElementById('currentPath');
+            if (pathDisplay) {
+                pathDisplay.innerHTML = `<i class="fas fa-folder"></i> ${path}`;
+            }
+            
+            // Обновляем кнопку "Назад"
+            const backButton = document.querySelector('.main-header .back-btn');
+            if (backButton) {
+                if (path === '<?php echo $startPath; ?>' || path === '/') {
+                    backButton.style.visibility = 'hidden';
+                } else {
+                    backButton.style.visibility = 'visible';
+                    backButton.href = `?action=browse&server=${encodeURIComponent(server)}&path=${encodeURIComponent(dirname(path))}`;
+                }
+            }
+        }
 
         // Загрузка дерева
         async function loadTree(server, path) {
@@ -907,6 +1029,8 @@ if (isset($_GET['ajax'])) {
             
             console.log('Loading directory:', path);
             
+            browser.innerHTML = '<div style="text-align: center; padding: 40px;"><div class="loader"></div> Загрузка файлов...</div>';
+            
             fetch(`?action=browse&server=${encodeURIComponent(server)}&path=${encodeURIComponent(path)}&ajax=1`)
                 .then(response => {
                     if (!response.ok) {
@@ -917,11 +1041,46 @@ if (isset($_GET['ajax'])) {
                 .then(html => {
                     browser.innerHTML = html;
                     
-                    // Обновляем путь в заголовке
-                    const pathDisplay = document.getElementById('currentPath');
-                    if (pathDisplay) {
-                        pathDisplay.innerHTML = `<i class="fas fa-folder"></i> ${path}`;
-                    }
+                    // Делаем все ссылки в файловом браузере AJAX-запросами
+                    const links = browser.querySelectorAll('a.file-item');
+                    links.forEach(link => {
+                        const href = link.getAttribute('href');
+                        if (href.includes('action=view_file')) {
+                            link.onclick = function(e) {
+                                e.preventDefault();
+                                const params = new URLSearchParams(href.split('?')[1]);
+                                const server = params.get('server');
+                                const filePath = params.get('file_path');
+                                const fileName = filePath.split('/').pop();
+                                loadFileContent(server, filePath, fileName);
+                            };
+                        } else if (href.includes('action=browse')) {
+                            link.onclick = function(e) {
+                                e.preventDefault();
+                                const params = new URLSearchParams(href.split('?')[1]);
+                                const server = params.get('server');
+                                const path = params.get('path');
+                                loadDirectory(server, path);
+                                
+                                // Обновляем путь в заголовке
+                                const pathDisplay = document.getElementById('currentPath');
+                                if (pathDisplay) {
+                                    pathDisplay.innerHTML = `<i class="fas fa-folder"></i> ${path}`;
+                                }
+                                
+                                // Обновляем кнопку "Назад"
+                                const backButton = document.querySelector('.main-header .back-btn');
+                                if (backButton) {
+                                    if (path === '<?php echo $startPath; ?>' || path === '/') {
+                                        backButton.style.visibility = 'hidden';
+                                    } else {
+                                        backButton.style.visibility = 'visible';
+                                        backButton.href = `?action=browse&server=${encodeURIComponent(server)}&path=${encodeURIComponent(dirname(path))}`;
+                                    }
+                                }
+                            };
+                        }
+                    });
                 })
                 .catch(error => {
                     console.error('Error loading directory:', error);
@@ -945,3 +1104,69 @@ if (isset($_GET['ajax'])) {
     </script>
 </body>
 </html>
+
+
+<?php
+// Добавим функцию для рендеринга содержимого файла
+function renderFileContent($fileData, $serverName) {
+    $html = '
+    <div class="file-info-card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+            <h3 style="margin: 0;">
+                <i class="fas fa-file"></i> 
+                ' . htmlspecialchars(basename($fileData['path'] ?? '')) . '
+            </h3>
+            <button onclick="showFileBrowser(\'' . htmlspecialchars($serverName) . '\', \'' . htmlspecialchars(dirname($fileData['path'])) . '\')" class="back-btn btn-sm">
+                <i class="fas fa-arrow-left"></i> Назад
+            </button>
+        </div>
+        
+        <div class="info-grid">
+            <div class="info-item">
+                <span class="info-label">Путь:</span>
+                <span class="info-value">' . htmlspecialchars(dirname($fileData['path'] ?? '')) . '</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">Размер:</span>
+                <span class="info-value">' . formatSize($fileData['size'] ?? 0) . '</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">Тип:</span>
+                <span class="info-value">' . htmlspecialchars($fileData['file_type'] ?? '') . '</span>
+            </div>';
+            
+    if (isset($fileData['lines'])) {
+        $html .= '
+            <div class="info-item">
+                <span class="info-label">Строк:</span>
+                <span class="info-value">' . $fileData['lines'] . '</span>
+            </div>';
+    }
+    
+    if (isset($fileData['encoding']) && $fileData['encoding'] !== 'binary') {
+        $html .= '
+            <div class="info-item">
+                <span class="info-label">Кодировка:</span>
+                <span class="info-value">' . htmlspecialchars($fileData['encoding']) . '</span>
+            </div>';
+    }
+    
+    $html .= '
+        </div>
+    </div>';
+    
+    $html .= '
+    <div class="file-content ' . (($fileData['type'] ?? '') === 'binary' ? 'binary' : '') . '">';
+    
+    if (($fileData['type'] ?? '') === 'binary') {
+        $html .= '⚠️ Это бинарный файл. Не удалось отобразить содержимое.<br>';
+        $html .= 'Размер: ' . formatSize($fileData['size'] ?? 0) . '<br>';
+        $html .= 'Тип: ' . htmlspecialchars($fileData['file_type'] ?? '');
+    } else {
+        $html .= htmlspecialchars($fileData['content'] ?? '');
+    }
+    
+    $html .= '</div>';
+    
+    return $html;
+}
