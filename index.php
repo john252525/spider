@@ -6,14 +6,6 @@ ini_set('display_errors', 1);
 
 
 
-// config.php - создайте этот файл и настройте доступы SSH
-// <?php
-// define('SSH_HOST', 'ваш_сервер');
-// define('SSH_PORT', 22);
-// define('SSH_USER', 'ваш_пользователь');
-// define('SSH_KEY_PATH', '/путь/к/ssh/key'); // или использовать пароль
-// define('SSH_PASSWORD', 'ваш_пароль'); // если используете пароль
-
 session_start();
 
 // Функция для выполнения SSH команды
@@ -23,7 +15,19 @@ function executeSSHCommand($serverName, $path) {
         return "Ошибка: Создайте файл config.php с настройками SSH";
     }
     
-    require_once 'config.php';
+    require 'config.php';
+    
+    // Проверяем существование указанного сервера в конфиге
+    if (!isset($servers[$serverName])) {
+        return "Ошибка: Сервер '{$serverName}' не найден в конфигурации";
+    }
+    
+    $server = $servers[$serverName];
+    
+    // Проверяем обязательные параметры
+    if (empty($server['host']) || empty($server['user'])) {
+        return "Ошибка: Неверная конфигурация для сервера '{$serverName}'";
+    }
     
     // Проверяем и чистим путь
     $path = trim($path);
@@ -35,25 +39,34 @@ function executeSSHCommand($serverName, $path) {
     $path = rtrim($path, '/');
     
     try {
+        // Порт по умолчанию
+        $port = $server['port'] ?? 22;
+        
         // Создаем соединение SSH2
-        $connection = ssh2_connect(SSH_HOST, SSH_PORT);
+        $connection = ssh2_connect($server['host'], $port);
         if (!$connection) {
-            return "Ошибка: Не удалось подключиться к серверу";
+            return "Ошибка: Не удалось подключиться к серверу {$server['host']}:{$port}";
         }
         
-        // Аутентификация (используйте один из методов)
-        if (defined('SSH_KEY_PATH') && SSH_KEY_PATH) {
+        // Аутентификация
+        $authenticated = false;
+        
+        if (isset($server['key_path']) && $server['key_path']) {
             // Аутентификация по ключу
-            if (!ssh2_auth_pubkey_file($connection, SSH_USER, SSH_KEY_PATH . '.pub', SSH_KEY_PATH)) {
-                return "Ошибка: Неверный SSH ключ";
-            }
-        } elseif (defined('SSH_PASSWORD') && SSH_PASSWORD) {
+            $authenticated = ssh2_auth_pubkey_file(
+                $connection, 
+                $server['user'], 
+                $server['key_path'] . '.pub', 
+                $server['key_path'],
+                $server['key_passphrase'] ?? ''
+            );
+        } elseif (isset($server['password']) && $server['password']) {
             // Аутентификация по паролю
-            if (!ssh2_auth_password($connection, SSH_USER, SSH_PASSWORD)) {
-                return "Ошибка: Неверный логин или пароль";
-            }
-        } else {
-            return "Ошибка: Настройте метод аутентификации в config.php";
+            $authenticated = ssh2_auth_password($connection, $server['user'], $server['password']);
+        }
+        
+        if (!$authenticated) {
+            return "Ошибка: Не удалось авторизоваться на сервере";
         }
         
         // Выполняем команду для получения списка файлов
@@ -77,9 +90,22 @@ function executeSSHCommand($serverName, $path) {
             fclose($stream);
         }
         
+        // Дополнительная информация о директории
+        $command2 = "cd " . escapeshellarg($path) . " && pwd 2>&1";
+        $stream2 = ssh2_exec($connection, $command2);
+        stream_set_blocking($stream2, true);
+        $pwd = trim(stream_get_contents($stream2));
+        fclose($stream2);
+        
         ssh2_disconnect($connection);
         
-        return htmlspecialchars($output, ENT_QUOTES, 'UTF-8');
+        $result = "Сервер: {$serverName} ({$server['host']})\n";
+        $result .= "Текущая директория: {$pwd}\n";
+        $result .= "Пользователь: {$server['user']}\n";
+        $result .= str_repeat("-", 80) . "\n\n";
+        $result .= htmlspecialchars($output, ENT_QUOTES, 'UTF-8');
+        
+        return $result;
         
     } catch (Exception $e) {
         return "Ошибка: " . $e->getMessage();
@@ -110,8 +136,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['path_input'])) {
     }
 }
 
+// Получаем список серверов из конфига для подсказок
+$availableServers = [];
+if (file_exists('config.php')) {
+    require 'config.php';
+    $availableServers = array_keys($servers);
+}
+
 // Получаем последние значения из сессии
-$last_server = $_SESSION['last_server'] ?? 'fvds30';
+$last_server = $_SESSION['last_server'] ?? ($availableServers[0] ?? '');
 $last_path = $_SESSION['last_path'] ?? '/var/www/html';
 ?>
 
@@ -249,24 +282,52 @@ $last_path = $_SESSION['last_path'] ?? '/var/www/html';
             word-break: break-all;
         }
         
-        .examples {
-            margin-top: 30px;
+        .servers-list {
+            margin-top: 20px;
+            padding: 15px;
             background: #edf2f7;
-            padding: 20px;
             border-radius: 10px;
         }
         
-        .examples h3 {
+        .servers-list h3 {
             color: #4a5568;
             margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
         }
         
-        .example-item {
+        .servers-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 10px;
+            margin-top: 10px;
+        }
+        
+        .server-item {
             background: white;
-            padding: 10px 15px;
-            margin: 5px 0;
-            border-radius: 5px;
-            border-left: 4px solid #667eea;
+            padding: 12px;
+            border-radius: 8px;
+            border: 2px solid #e2e8f0;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .server-item:hover {
+            border-color: #667eea;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+        
+        .server-name {
+            font-weight: bold;
+            color: #4a5568;
+            margin-bottom: 5px;
+        }
+        
+        .server-details {
+            font-size: 0.85rem;
+            color: #718096;
         }
         
         .footer {
@@ -295,6 +356,15 @@ $last_path = $_SESSION['last_path'] ?? '/var/www/html';
             border-left: 4px solid #38a169;
         }
         
+        .info {
+            color: #3182ce;
+            background: #bee3f8;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            border-left: 4px solid #3182ce;
+        }
+        
         @media (max-width: 768px) {
             .input-group {
                 flex-direction: column;
@@ -307,6 +377,10 @@ $last_path = $_SESSION['last_path'] ?? '/var/www/html';
             .header h1 {
                 font-size: 2rem;
             }
+            
+            .servers-grid {
+                grid-template-columns: 1fr;
+            }
         }
     </style>
 </head>
@@ -318,7 +392,7 @@ $last_path = $_SESSION['last_path'] ?? '/var/www/html';
         </div>
         
         <div class="content">
-            <form method="POST" action="">
+            <form method="POST" action="" id="sshForm">
                 <div class="input-section">
                     <label class="input-label">Введите сервер и путь:</label>
                     <div class="input-group">
@@ -327,7 +401,8 @@ $last_path = $_SESSION['last_path'] ?? '/var/www/html';
                                class="path-input" 
                                value="<?php echo htmlspecialchars("{$last_server} {$last_path}", ENT_QUOTES, 'UTF-8'); ?>"
                                placeholder="fvds30 /var/www/html"
-                               required>
+                               required
+                               id="pathInput">
                         <button type="submit" class="btn">Показать файлы</button>
                     </div>
                     <div class="format-hint">
@@ -336,6 +411,29 @@ $last_path = $_SESSION['last_path'] ?? '/var/www/html';
                 </div>
             </form>
             
+            <?php if (!file_exists('config.php')): ?>
+                <div class="error">
+                    <strong>Внимание:</strong> Файл config.php не найден. Создайте его по примеру ниже:
+                    <pre style="margin-top: 10px; padding: 10px; background: #fff; border-radius: 5px; overflow-x: auto;">
+&lt;?php
+$servers = [
+    'fvds30' => [
+        'host' => '192.168.1.100',
+        'port' => 22,
+        'user' => 'username',
+        'key_path' => '/путь/к/ssh/key' // без .pub
+    ],
+    'backup' => [
+        'host' => 'backup.example.com',
+        'port' => 2222,
+        'user' => 'user',
+        'password' => 'ваш_пароль'
+    ]
+];
+                    </pre>
+                </div>
+            <?php endif; ?>
+            
             <?php if ($result): ?>
                 <div class="result-section">
                     <div class="result-title">Содержимое директории:</div>
@@ -343,18 +441,70 @@ $last_path = $_SESSION['last_path'] ?? '/var/www/html';
                 </div>
             <?php endif; ?>
             
-            <div class="examples">
-                <h3>Примеры использования:</h3>
-                <div class="example-item"><strong>fvds30 /var/www/html</strong> - корень веб-сервера</div>
-                <div class="example-item"><strong>server1:/home/user/docs/</strong> - с двоеточием и слешем</div>
-                <div class="example-item"><strong>prod-server /etc/nginx</strong> - конфигурация nginx</div>
-                <div class="example-item"><strong>backup ../logs</strong> - на уровень выше</div>
-            </div>
+            <?php if (!empty($availableServers)): ?>
+                <div class="servers-list">
+                    <h3>📡 Доступные серверы:</h3>
+                    <div class="servers-grid" id="serversGrid">
+                        <?php foreach ($availableServers as $serverName): ?>
+                            <?php if (file_exists('config.php')): ?>
+                                <?php 
+                                require 'config.php';
+                                $server = $servers[$serverName] ?? [];
+                                ?>
+                                <div class="server-item" onclick="selectServer('<?php echo $serverName; ?>')">
+                                    <div class="server-name"><?php echo htmlspecialchars($serverName); ?></div>
+                                    <div class="server-details">
+                                        <?php echo htmlspecialchars($server['host'] ?? 'не указан'); ?>
+                                        <?php if (isset($server['port']) && $server['port'] != 22): ?>
+                                            :<?php echo $server['port']; ?>
+                                        <?php endif; ?>
+                                        <br>
+                                        Пользователь: <?php echo htmlspecialchars($server['user'] ?? 'не указан'); ?>
+                                    </div>
+                                </div>
+                            <?php endif; ?>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+            <?php elseif (file_exists('config.php')): ?>
+                <div class="info">
+                    Серверы не настроены в config.php. Добавьте серверы в массив $servers.
+                </div>
+            <?php endif; ?>
         </div>
         
         <div class="footer">
             © <?php echo date('Y'); ?> SSH File Browser | Используйте с умом
         </div>
     </div>
+    
+    <script>
+        function selectServer(serverName) {
+            const input = document.getElementById('pathInput');
+            const currentValue = input.value.trim();
+            
+            // Если уже есть путь, оставляем его
+            let newPath = '/var/www/html';
+            if (currentValue) {
+                const parts = currentValue.split(/[\s:]+/);
+                if (parts.length >= 2) {
+                    newPath = parts.slice(1).join(' ');
+                }
+            }
+            
+            input.value = serverName + ' ' + newPath;
+            input.focus();
+        }
+        
+        // Автофокус на поле ввода
+        document.getElementById('pathInput')?.focus();
+        
+        // Обработка Enter в поле ввода
+        document.getElementById('pathInput')?.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                document.getElementById('sshForm').submit();
+            }
+        });
+    </script>
 </body>
 </html>
