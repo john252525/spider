@@ -173,6 +173,55 @@ try {
                 exit;
             }
             break;
+
+
+
+
+            case 'list_all_files_filtered':
+            $serverName = $_GET['server'] ?? $_SESSION['current_server'] ?? '';
+            $path = $_GET['path'] ?? $startPath;
+            
+            if ($serverName && isset($_GET['ajax'])) {
+                $ssh = new SSHManager($serverName);
+                $ssh->connect();
+                
+                $files = $ssh->listAllFilesFiltered($path);
+                
+                header('Content-Type: application/json');
+                echo json_encode($files);
+                exit;
+            }
+            break;
+
+            case 'read_multiple_files':
+            if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_GET['ajax'])) {
+                $serverName = $_GET['server'] ?? $_SESSION['current_server'] ?? '';
+                $input = json_decode(file_get_contents('php://input'), true);
+                $files = $input['files'] ?? [];
+                
+                if ($serverName && !empty($files)) {
+                    $ssh = new SSHManager($serverName);
+                    $ssh->connect();
+                    
+                    $result = [];
+                    foreach ($files as $filePath) {
+                        try {
+                            $fileData = $ssh->readFile($filePath);
+                            $result[$filePath] = $fileData['content'] ?? '';
+                        } catch (Exception $e) {
+                            $result[$filePath] = ['error' => $e->getMessage()];
+                        }
+                    }
+                    
+                    header('Content-Type: application/json');
+                    echo json_encode($result, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+                    exit;
+                }
+            }
+            break;
+
+
+
         }
     }
     
@@ -640,6 +689,67 @@ if (isset($_GET['ajax'])) {
             font-size: 12px;
         }
 
+
+
+
+        /* Добавьте в секцию стилей */
+        .btn-primary {
+            background: #805ad5;
+        }
+
+        .btn-primary:hover {
+            background: #6b46c1;
+        }
+
+        .btn-large {
+            padding: 12px 30px;
+            font-size: 16px;
+        }
+
+        .json-textarea {
+            font-family: 'Fira Code', 'Courier New', monospace;
+            background: #1a202c;
+            color: #cbd5e0;
+            border: 2px solid #4a5568;
+        }
+
+        .files-textarea {
+            width: 100%;
+            padding: 15px;
+            font-family: 'Fira Code', 'Courier New', monospace;
+            font-size: 14px;
+            line-height: 1.5;
+            background: white;
+            color: #2d3748;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            resize: vertical;
+            min-height: 300px;
+        }
+
+        .files-textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .filter-info {
+            background: #e6fffa;
+            padding: 12px;
+            border-radius: 6px;
+            margin: 15px 0;
+            font-size: 13px;
+            border-left: 4px solid #38a169;
+        }
+
+        .filter-info i {
+            color: #38a169;
+            margin-right: 8px;
+        }
+
+
+
+
+
     </style>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
@@ -870,16 +980,6 @@ window.createTreeElement = function(item, server) {
     
     div.appendChild(name);
     
-    // Размер для файлов
-    if (item.type === 'file' && item.size) {
-        const size = document.createElement('span');
-        size.style.fontSize = '11px';
-        size.style.color = '#718096';
-        size.style.marginLeft = '8px';
-        size.textContent = formatSize(item.size);
-        div.appendChild(size);
-    }
-    
     li.appendChild(div);
     
     // Контейнер для дочерних элементов
@@ -892,7 +992,7 @@ window.createTreeElement = function(item, server) {
     return li;
 };
 
-// Загрузка всех файлов в папке рекурсивно
+// Загрузка всех файлов в папке рекурсивно с фильтрацией
 async function loadAllFiles(server, path) {
     console.log('Loading all files for path:', path);
     
@@ -916,21 +1016,80 @@ async function loadAllFiles(server, path) {
     filesContainer.innerHTML = `
         <div style="text-align: center; padding: 40px;">
             <div class="loader"></div> 
-            <p>Сканирование файлов...</p>
+            <p>Сканирование файлов с фильтрацией...</p>
         </div>
     `;
     filesContainer.style.display = 'block';
     
     try {
-        // Загружаем список файлов через AJAX
-        const response = await fetch(`?action=list_all_files&server=${encodeURIComponent(server)}&path=${encodeURIComponent(path)}&ajax=1`);
+        // Загружаем список файлов через AJAX с фильтрацией
+        const response = await fetch(`?action=list_all_files_filtered&server=${encodeURIComponent(server)}&path=${encodeURIComponent(path)}&ajax=1`);
         
         if (!response.ok) {
             throw new Error(`HTTP error: ${response.status}`);
         }
         
-        const html = await response.text();
-        filesContainer.innerHTML = html;
+        const files = await response.json();
+        console.log('Filtered files data:', files);
+        
+        // Формируем содержимое для textarea
+        let fileListText = '';
+        files.forEach(file => {
+            fileListText += file.path + '\n';
+        });
+        
+        filesContainer.innerHTML = `
+            <div class="all-files-container">
+                <div class="file-info-card">
+                    <h3><i class="fas fa-list"></i> Все файлы в ${escapeHtml(path)}</h3>
+                    <div class="info-grid">
+                        <div class="info-item">
+                            <span class="info-label">Файлов:</span>
+                            <span class="info-value">${files.length}</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Папка:</span>
+                            <span class="info-value">${escapeHtml(path)}</span>
+                        </div>
+                    </div>
+                    
+                    <div style="margin-top: 20px; margin-bottom: 20px;">
+                        <button onclick="copyAllFiles()" class="btn" style="margin-right: 10px;">
+                            <i class="fas fa-copy"></i> Копировать все пути
+                        </button>
+                        <button onclick="downloadFileList()" class="btn" style="margin-right: 10px;">
+                            <i class="fas fa-download"></i> Скачать список
+                        </button>
+                        <button onclick="loadFilesContent()" class="btn btn-primary">
+                            <i class="fas fa-file-alt"></i> Прочитать все файлы
+                        </button>
+                    </div>
+                    
+                    <div class="filter-info" style="background: #e6fffa; padding: 10px; border-radius: 5px; margin-bottom: 15px; font-size: 13px;">
+                        <i class="fas fa-filter"></i> Применены фильтры: 
+                        <ul style="margin: 5px 0 0 20px;">
+                            <li>Скрыты файлы/папки, начинающиеся с точки (.*)</li>
+                            <li>Применены правила из .gitignore (если есть)</li>
+                        </ul>
+                    </div>
+                </div>
+                
+                <div class="files-list-container">
+                    <textarea id="allFilesTextarea" class="files-textarea" rows="25" placeholder="Редактируйте список файлов...">${fileListText}</textarea>
+                    
+                    <div style="margin-top: 15px; text-align: center;">
+                        <button onclick="loadFilesContent()" class="btn btn-primary btn-large">
+                            <i class="fas fa-file-alt"></i> Прочитать содержимое выбранных файлов
+                        </button>
+                        <p style="margin-top: 10px; color: #718096; font-size: 13px;">
+                            Отредактируйте список выше, удалив ненужные файлы, затем нажмите кнопку
+                        </p>
+                    </div>
+                </div>
+                
+                <div id="filesContentResult" style="margin-top: 30px; display: none;"></div>
+            </div>
+        `;
         
         // Обновляем путь в заголовке
         const pathDisplay = document.getElementById('currentPath');
@@ -960,6 +1119,146 @@ async function loadAllFiles(server, path) {
                 </button>
             </div>
         `;
+    }
+}
+
+// Загрузка содержимого всех файлов из textarea
+async function loadFilesContent() {
+    const textarea = document.getElementById('allFilesTextarea');
+    if (!textarea) {
+        showNotification('Ошибка: textarea не найден', 'error');
+        return;
+    }
+    
+    const filePaths = textarea.value.split('\n')
+        .map(path => path.trim())
+        .filter(path => path.length > 0 && !path.startsWith('#') && path !== '...');
+    
+    if (filePaths.length === 0) {
+        showNotification('Нет файлов для чтения', 'error');
+        return;
+    }
+    
+    console.log('Loading content for', filePaths.length, 'files');
+    
+    // Получаем сервер из текущего состояния
+    const currentServer = '<?php echo escapeOutput($currentServer); ?>';
+    if (!currentServer) {
+        showNotification('Ошибка: сервер не выбран', 'error');
+        return;
+    }
+    
+    // Показываем загрузку
+    const resultContainer = document.getElementById('filesContentResult');
+    if (resultContainer) {
+        resultContainer.style.display = 'block';
+        resultContainer.innerHTML = `
+            <div style="text-align: center; padding: 30px;">
+                <div class="loader"></div> 
+                <p>Чтение ${filePaths.length} файлов...</p>
+                <p style="font-size: 13px; color: #718096;">Это может занять некоторое время</p>
+            </div>
+        `;
+    }
+    
+    try {
+        // Загружаем содержимое файлов через AJAX
+        const response = await fetch(`?action=read_multiple_files&server=${encodeURIComponent(currentServer)}&ajax=1`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                files: filePaths
+            })
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error: ${response.status}`);
+        }
+        
+        const result = await response.json();
+        console.log('Files content loaded:', result);
+        
+        // Форматируем результат как JSON
+        const formattedJson = JSON.stringify(result, null, 2);
+        
+        if (resultContainer) {
+            resultContainer.innerHTML = `
+                <div class="file-info-card">
+                    <h3><i class="fas fa-file-code"></i> Результат чтения файлов</h3>
+                    <div class="info-grid">
+                        <div class="info-item">
+                            <span class="info-label">Прочитано файлов:</span>
+                            <span class="info-value">${Object.keys(result).length}</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Ошибок:</span>
+                            <span class="info-value">${Object.values(result).filter(r => r.error).length}</span>
+                        </div>
+                    </div>
+                    
+                    <div style="margin-top: 15px;">
+                        <button onclick="copyResultJson()" class="btn" style="margin-right: 10px;">
+                            <i class="fas fa-copy"></i> Копировать JSON
+                        </button>
+                        <button onclick="downloadResultJson()" class="btn">
+                            <i class="fas fa-download"></i> Скачать JSON
+                        </button>
+                    </div>
+                </div>
+                
+                <div style="margin-top: 20px;">
+                    <textarea id="resultJsonTextarea" class="files-textarea json-textarea" rows="20" readonly>${escapeHtml(formattedJson)}</textarea>
+                </div>
+                
+                <div style="margin-top: 15px; font-size: 13px; color: #718096;">
+                    <p><strong>Формат результата:</strong> ключ - полный путь файла, значение - содержимое файла или объект с ошибкой</p>
+                </div>
+            `;
+        }
+        
+        showNotification(`Успешно прочитано ${Object.keys(result).length} файлов`, 'success');
+        
+    } catch (error) {
+        console.error('Error loading files content:', error);
+        if (resultContainer) {
+            resultContainer.innerHTML = `
+                <div class="error">
+                    <h3>Ошибка чтения файлов</h3>
+                    <p>${error.message}</p>
+                </div>
+            `;
+        }
+        showNotification('Ошибка при чтении файлов', 'error');
+    }
+}
+
+// Копирование результата JSON
+function copyResultJson() {
+    const textarea = document.getElementById('resultJsonTextarea');
+    if (textarea) {
+        textarea.select();
+        document.execCommand('copy');
+        showNotification('JSON скопирован в буфер обмена!', 'success');
+    }
+}
+
+// Скачивание результата JSON
+function downloadResultJson() {
+    const textarea = document.getElementById('resultJsonTextarea');
+    if (textarea) {
+        const content = textarea.value;
+        const blob = new Blob([content], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'files_content.json';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showNotification('JSON файл скачан!', 'success');
     }
 }
 
@@ -1053,6 +1352,12 @@ function showFileBrowser(server, path) {
     const filesContainer = document.getElementById('allFilesContainer');
     if (filesContainer) {
         filesContainer.style.display = 'none';
+    }
+    
+    // Скрываем результат чтения файлов
+    const resultContainer = document.getElementById('filesContentResult');
+    if (resultContainer) {
+        resultContainer.style.display = 'none';
     }
     
     // Показываем файловый браузер
@@ -1272,9 +1577,7 @@ function copyAllFiles() {
     if (textarea) {
         textarea.select();
         document.execCommand('copy');
-        
-        // Показать уведомление
-        showNotification('Пути файлов скопированы в буфер обмена!');
+        showNotification('Пути файлов скопированы в буфер обмена!', 'success');
     }
 }
 
@@ -1292,20 +1595,25 @@ function downloadFileList() {
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
-        
-        // Показать уведомление
-        showNotification('Список файлов скачан!');
+        showNotification('Список файлов скачан!', 'success');
     }
 }
 
+// Экранирование HTML
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
 // Показать уведомление
-function showNotification(message) {
+function showNotification(message, type = 'success') {
     // Создаем уведомление
     const notification = document.createElement('div');
     notification.style.position = 'fixed';
     notification.style.top = '20px';
     notification.style.right = '20px';
-    notification.style.backgroundColor = '#38a169';
+    notification.style.backgroundColor = type === 'success' ? '#38a169' : '#e53e3e';
     notification.style.color = 'white';
     notification.style.padding = '15px 20px';
     notification.style.borderRadius = '5px';

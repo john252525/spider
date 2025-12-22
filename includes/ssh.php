@@ -258,4 +258,106 @@ class SSHManager {
         
         return $result;
     }
+
+
+
+
+    public function listAllFilesFiltered($path) {
+        $path = $this->sanitizePath($path);
+        
+        // Получаем правила .gitignore если есть
+        $gitignoreRules = [];
+        try {
+            $gitignorePath = $path . '/.gitignore';
+            if ($this->fileExists($gitignorePath)) {
+                $gitignoreContent = $this->executeCommand("cat " . escapeshellarg($gitignorePath));
+                $gitignoreRules = $this->parseGitignore($gitignoreContent, $path);
+            }
+        } catch (Exception $e) {
+            // .gitignore не найден или ошибка чтения - игнорируем
+        }
+        
+        // Команда для рекурсивного поиска всех файлов
+        $command = "find " . escapeshellarg($path) . " -type f 2>/dev/null";
+        $output = $this->executeCommand($command);
+        
+        $files = explode("\n", trim($output));
+        $filteredFiles = [];
+        
+        foreach ($files as $file) {
+            $file = trim($file);
+            if (empty($file)) continue;
+            
+            // Фильтр 1: скрыть файлы/папки начинающиеся с точки
+            if (preg_match('/\/\.[^\/]+$/', $file) || preg_match('/\/\.[^\/]+\//', $file)) {
+                continue;
+            }
+            
+            // Фильтр 2: применить правила .gitignore
+            $shouldExclude = false;
+            foreach ($gitignoreRules as $pattern) {
+                if (fnmatch($pattern, $file) || fnmatch($pattern . '/*', $file)) {
+                    $shouldExclude = true;
+                    break;
+                }
+            }
+            if ($shouldExclude) {
+                continue;
+            }
+            
+            $filteredFiles[] = ['path' => $file];
+        }
+        
+        // Ограничиваем количество
+        if (count($filteredFiles) > 1000) {
+            $filteredFiles = array_slice($filteredFiles, 0, 1000);
+        }
+        
+        return $filteredFiles;
+    }
+    
+    private function fileExists($path) {
+        $result = trim($this->executeCommand(
+            "if [ -f " . escapeshellarg($path) . " ]; then echo '1'; else echo '0'; fi"
+        ));
+        return $result === '1';
+    }
+    
+    private function parseGitignore($content, $basePath) {
+        $rules = [];
+        $lines = explode("\n", $content);
+        
+        foreach ($lines as $line) {
+            $line = trim($line);
+            
+            // Пропускаем пустые строки и комментарии
+            if (empty($line) || $line[0] === '#') {
+                continue;
+            }
+            
+            // Удаляем trailing spaces
+            $line = rtrim($line);
+            
+            // Обработка правил
+            if ($line[0] === '/') {
+                // Абсолютный путь от корня репозитория
+                $rules[] = $basePath . $line;
+            } else if (strpos($line, '/') !== false) {
+                // Относительный путь с поддиректориями
+                $rules[] = $basePath . '/' . $line;
+            } else {
+                // Просто шаблон файла
+                $rules[] = $basePath . '/*/' . $line;
+                $rules[] = $basePath . '/' . $line;
+            }
+        }
+        
+        return $rules;
+    }
+
+
+
+
+
+
 }
