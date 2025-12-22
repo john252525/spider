@@ -1,4 +1,10 @@
 <?php
+
+define('START_PATH', '/var');
+
+
+
+
 session_start();
 
 // Подключаем модули
@@ -150,6 +156,23 @@ try {
                     exit;
                 }
                 break;
+
+            case 'list_all_files':
+            $serverName = $_GET['server'] ?? $_SESSION['current_server'] ?? '';
+            $path = $_GET['path'] ?? $startPath;
+            
+            if ($serverName && isset($_GET['ajax'])) {
+                $ssh = new SSHManager($serverName);
+                $ssh->connect();
+                
+                $files = $ssh->listDirectoryTree($path);
+                
+                // Формируем HTML для отображения списка файлов
+                $html = renderAllFilesList($files, $serverName, $path);
+                echo $html;
+                exit;
+            }
+            break;
         }
     }
     
@@ -561,6 +584,62 @@ if (isset($_GET['ajax'])) {
                 height: 300px;
             }
         }
+
+
+
+
+        .all-files-container {
+            padding: 20px;
+        }
+
+        .files-list-container {
+            margin-top: 20px;
+        }
+
+        .files-textarea {
+            width: 100%;
+            padding: 15px;
+            font-family: 'Fira Code', 'Courier New', monospace;
+            font-size: 14px;
+            line-height: 1.5;
+            background: #1a202c;
+            color: #cbd5e0;
+            border: 2px solid #4a5568;
+            border-radius: 8px;
+            resize: vertical;
+            min-height: 400px;
+        }
+
+        .files-textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        /* Кнопки */
+        .btn {
+            padding: 10px 20px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+
+        .btn:hover {
+            background: #5a67d8;
+        }
+
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+
     </style>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
@@ -710,397 +789,537 @@ if (isset($_GET['ajax'])) {
     </div>
     
     <script>
-        // Упрощенная версия JavaScript
-        document.addEventListener('DOMContentLoaded', function() {
-            const currentServer = '<?php echo escapeOutput($currentServer); ?>';
-            const currentPath = '<?php echo escapeOutput($currentPath); ?>';
-            
-            console.log('Initializing... Server:', currentServer, 'Path:', currentPath);
-            
-            if (currentServer) {
-                // Загружаем дерево для /var
-                loadTree(currentServer, '<?php echo $startPath; ?>');
-                
-                // Загружаем содержимое текущей директории
-                if (currentPath) {
-                    loadDirectory(currentServer, currentPath);
-                }
-            }
-        });
+// Упрощенная версия JavaScript
+document.addEventListener('DOMContentLoaded', function() {
+    const currentServer = '<?php echo escapeOutput($currentServer); ?>';
+    const currentPath = '<?php echo escapeOutput($currentPath); ?>';
+    
+    console.log('Initializing... Server:', currentServer, 'Path:', currentPath);
+    
+    if (currentServer) {
+        // Загружаем дерево для /var
+        loadTree(currentServer, '<?php echo $startPath; ?>');
+        
+        // Загружаем содержимое текущей директории
+        if (currentPath) {
+            loadDirectory(currentServer, currentPath);
+        }
+    }
+});
 
-        // Функция создания элемента дерева (должна быть глобальной)
-        window.createTreeElement = function(item, server) {
-            const li = document.createElement('li');
-            
-            const div = document.createElement('div');
-            div.className = 'simple-tree-item';
-            div.dataset.path = item.path;
-            div.dataset.type = item.type;
-            
-            // Стрелка для директорий
-            if (item.type === 'directory') {
-                const arrow = document.createElement('span');
-                arrow.className = 'tree-arrow';
-                arrow.innerHTML = '▶';
-                arrow.onclick = function(e) {
-                    e.stopPropagation();
-                    toggleSimpleDirectory(item, arrow, li, server);
-                };
-                div.appendChild(arrow);
-            } else {
-                const spacer = document.createElement('span');
-                spacer.className = 'tree-arrow';
-                spacer.innerHTML = '&nbsp;';
-                div.appendChild(spacer);
-            }
-            
-            // Иконка
-            const icon = document.createElement('span');
-            icon.className = 'tree-icon';
-            icon.innerHTML = item.type === 'directory' ? '📁' : (item.icon || '📄');
-            div.appendChild(icon);
-            
-            // Имя
-            const name = document.createElement('span');
-            name.className = 'tree-name';
-            name.textContent = item.name;
-            name.title = item.path;
-            
-            // Для файлов - делаем кликабельным
-            if (item.type === 'file') {
-                name.style.cursor = 'pointer';
-                name.style.color = '#3182ce';
-                name.onclick = function(e) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    console.log('Opening file:', item.path);
-                    loadFileContent(server, item.path, item.name);
-                };
-            }
-            
-            div.appendChild(name);
-            
-            // Размер для файлов
-            if (item.type === 'file' && item.size) {
-                const size = document.createElement('span');
-                size.style.fontSize = '11px';
-                size.style.color = '#718096';
-                size.style.marginLeft = '8px';
-                size.textContent = formatSize(item.size);
-                div.appendChild(size);
-            }
-            
-            li.appendChild(div);
-            
-            // Контейнер для дочерних элементов
-            if (item.type === 'directory') {
-                const childrenContainer = document.createElement('div');
-                childrenContainer.className = 'tree-children';
-                li.appendChild(childrenContainer);
-            }
-            
-            return li;
+// Функция создания элемента дерева (должна быть глобальной)
+window.createTreeElement = function(item, server) {
+    const li = document.createElement('li');
+    
+    const div = document.createElement('div');
+    div.className = 'simple-tree-item';
+    div.dataset.path = item.path;
+    div.dataset.type = item.type;
+    
+    // Стрелка для директорий
+    if (item.type === 'directory') {
+        const arrow = document.createElement('span');
+        arrow.className = 'tree-arrow';
+        arrow.innerHTML = '▶';
+        arrow.onclick = function(e) {
+            e.stopPropagation();
+            toggleSimpleDirectory(item, arrow, li, server);
         };
+        div.appendChild(arrow);
+    } else {
+        const spacer = document.createElement('span');
+        spacer.className = 'tree-arrow';
+        spacer.innerHTML = '&nbsp;';
+        div.appendChild(spacer);
+    }
+    
+    // Иконка
+    const icon = document.createElement('span');
+    icon.className = 'tree-icon';
+    icon.innerHTML = item.type === 'directory' ? '📁' : (item.icon || '📄');
+    div.appendChild(icon);
+    
+    // Имя
+    const name = document.createElement('span');
+    name.className = 'tree-name';
+    name.textContent = item.name;
+    name.title = item.path;
+    
+    // Для файлов - открываем файл
+    if (item.type === 'file') {
+        name.style.cursor = 'pointer';
+        name.style.color = '#3182ce';
+        name.onclick = function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('Opening file:', item.path);
+            loadFileContent(server, item.path, item.name);
+        };
+    }
+    // Для папок - показываем все файлы
+    else if (item.type === 'directory') {
+        name.style.cursor = 'pointer';
+        name.style.color = '#2d3748';
+        name.onclick = function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('Showing all files in:', item.path);
+            loadAllFiles(server, item.path);
+        };
+    }
+    
+    div.appendChild(name);
+    
+    // Размер для файлов
+    if (item.type === 'file' && item.size) {
+        const size = document.createElement('span');
+        size.style.fontSize = '11px';
+        size.style.color = '#718096';
+        size.style.marginLeft = '8px';
+        size.textContent = formatSize(item.size);
+        div.appendChild(size);
+    }
+    
+    li.appendChild(div);
+    
+    // Контейнер для дочерних элементов
+    if (item.type === 'directory') {
+        const childrenContainer = document.createElement('div');
+        childrenContainer.className = 'tree-children';
+        li.appendChild(childrenContainer);
+    }
+    
+    return li;
+};
 
-        // Загрузка содержимого файла через AJAX
-        async function loadFileContent(server, filePath, fileName) {
-            console.log('Loading file content:', filePath);
-            
-            // Показываем загрузку в основном окне
-            const contentArea = document.getElementById('contentArea');
-            const fileBrowser = document.getElementById('fileBrowser');
-            
-            if (fileBrowser) {
-                fileBrowser.style.display = 'none';
-            }
-            
-            // Создаем или получаем контейнер для файла
-            let fileContainer = document.getElementById('fileContentContainer');
-            if (!fileContainer) {
-                fileContainer = document.createElement('div');
-                fileContainer.id = 'fileContentContainer';
-                contentArea.appendChild(fileContainer);
-            }
-            
-            // Показываем загрузку
-            fileContainer.innerHTML = `
-                <div style="text-align: center; padding: 40px;">
-                    <div class="loader"></div> 
-                    <p>Загрузка файла...</p>
-                </div>
-            `;
-            fileContainer.style.display = 'block';
-            
-            try {
-                // Загружаем содержимое файла через AJAX
-                const response = await fetch(`?action=view_file&server=${encodeURIComponent(server)}&file_path=${encodeURIComponent(filePath)}&ajax=1`);
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP error: ${response.status}`);
-                }
-                
-                const html = await response.text();
-                fileContainer.innerHTML = html;
-                
-                // Обновляем путь в заголовке
-                const pathDisplay = document.getElementById('currentPath');
-                if (pathDisplay) {
-                    pathDisplay.innerHTML = `<i class="fas fa-file"></i> ${filePath}`;
-                }
-                
-                // Показываем кнопку "Назад к списку"
-                const backButton = document.querySelector('.main-header .back-btn');
-                if (backButton) {
-                    backButton.style.visibility = 'visible';
-                    backButton.href = `?action=browse&server=${encodeURIComponent(server)}&path=${encodeURIComponent(dirname(filePath))}`;
-                    backButton.onclick = function(e) {
-                        e.preventDefault();
-                        showFileBrowser(server, dirname(filePath));
-                    };
-                }
-                
-            } catch (error) {
-                console.error('Error loading file:', error);
-                fileContainer.innerHTML = `
-                    <div class="error">
-                        <h3>Ошибка загрузки файла</h3>
-                        <p>${error.message}</p>
-                        <button onclick="showFileBrowser('${server}', '${dirname(filePath)}')" class="back-btn">
-                            <i class="fas fa-arrow-left"></i> Назад к списку файлов
-                        </button>
-                    </div>
-                `;
-            }
+// Загрузка всех файлов в папке рекурсивно
+async function loadAllFiles(server, path) {
+    console.log('Loading all files for path:', path);
+    
+    // Показываем загрузку в основном окне
+    const contentArea = document.getElementById('contentArea');
+    const fileBrowser = document.getElementById('fileBrowser');
+    
+    if (fileBrowser) {
+        fileBrowser.style.display = 'none';
+    }
+    
+    // Создаем или получаем контейнер для списка файлов
+    let filesContainer = document.getElementById('allFilesContainer');
+    if (!filesContainer) {
+        filesContainer = document.createElement('div');
+        filesContainer.id = 'allFilesContainer';
+        contentArea.appendChild(filesContainer);
+    }
+    
+    // Показываем загрузку
+    filesContainer.innerHTML = `
+        <div style="text-align: center; padding: 40px;">
+            <div class="loader"></div> 
+            <p>Сканирование файлов...</p>
+        </div>
+    `;
+    filesContainer.style.display = 'block';
+    
+    try {
+        // Загружаем список файлов через AJAX
+        const response = await fetch(`?action=list_all_files&server=${encodeURIComponent(server)}&path=${encodeURIComponent(path)}&ajax=1`);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error: ${response.status}`);
         }
-
-        // Функция для получения директории из пути
-        function dirname(path) {
-            return path.split('/').slice(0, -1).join('/') || '/';
+        
+        const html = await response.text();
+        filesContainer.innerHTML = html;
+        
+        // Обновляем путь в заголовке
+        const pathDisplay = document.getElementById('currentPath');
+        if (pathDisplay) {
+            pathDisplay.innerHTML = `<i class="fas fa-folder-tree"></i> Все файлы в ${path}`;
         }
-
-        // Показать файловый браузер
-        function showFileBrowser(server, path) {
-            console.log('Showing file browser for path:', path);
-            
-            // Скрываем контейнер с файлом
-            const fileContainer = document.getElementById('fileContentContainer');
-            if (fileContainer) {
-                fileContainer.style.display = 'none';
-            }
-            
-            // Показываем файловый браузер
-            const fileBrowser = document.getElementById('fileBrowser');
-            if (fileBrowser) {
-                fileBrowser.style.display = 'block';
-                loadDirectory(server, path);
-            }
-            
-            // Обновляем путь в заголовке
-            const pathDisplay = document.getElementById('currentPath');
-            if (pathDisplay) {
-                pathDisplay.innerHTML = `<i class="fas fa-folder"></i> ${path}`;
-            }
-            
-            // Обновляем кнопку "Назад"
-            const backButton = document.querySelector('.main-header .back-btn');
-            if (backButton) {
-                if (path === '<?php echo $startPath; ?>' || path === '/') {
-                    backButton.style.visibility = 'hidden';
-                } else {
-                    backButton.style.visibility = 'visible';
-                    backButton.href = `?action=browse&server=${encodeURIComponent(server)}&path=${encodeURIComponent(dirname(path))}`;
-                }
-            }
+        
+        // Показываем кнопку "Назад к списку"
+        const backButton = document.querySelector('.main-header .back-btn');
+        if (backButton) {
+            backButton.style.visibility = 'visible';
+            backButton.href = `?action=browse&server=${encodeURIComponent(server)}&path=${encodeURIComponent(path)}`;
+            backButton.onclick = function(e) {
+                e.preventDefault();
+                showFileBrowser(server, path);
+            };
         }
+        
+    } catch (error) {
+        console.error('Error loading files list:', error);
+        filesContainer.innerHTML = `
+            <div class="error">
+                <h3>Ошибка загрузки списка файлов</h3>
+                <p>${error.message}</p>
+                <button onclick="showFileBrowser('${server}', '${path}')" class="back-btn">
+                    <i class="fas fa-arrow-left"></i> Назад
+                </button>
+            </div>
+        `;
+    }
+}
 
-        // Загрузка дерева
-        async function loadTree(server, path) {
-            const treeContainer = document.getElementById('serverTree');
-            if (!treeContainer) return;
-            
-            console.log('Loading tree for path:', path);
-            
-            try {
-                const response = await fetch(`?action=get_tree&server=${encodeURIComponent(server)}&path=${encodeURIComponent(path)}&ajax=1`);
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP error: ${response.status}`);
-                }
-                
-                const data = await response.json();
-                console.log('Tree data:', data);
-                
-                // Рендерим простое дерево
-                renderSimpleTree(treeContainer, data, server);
-                
-            } catch (error) {
-                console.error('Error loading tree:', error);
-                treeContainer.innerHTML = `<div class="error">Ошибка загрузки дерева: ${error.message}</div>`;
-            }
+// Загрузка содержимого файла через AJAX
+async function loadFileContent(server, filePath, fileName) {
+    console.log('Loading file content:', filePath);
+    
+    // Показываем загрузку в основном окне
+    const contentArea = document.getElementById('contentArea');
+    const fileBrowser = document.getElementById('fileBrowser');
+    
+    if (fileBrowser) {
+        fileBrowser.style.display = 'none';
+    }
+    
+    // Создаем или получаем контейнер для файла
+    let fileContainer = document.getElementById('fileContentContainer');
+    if (!fileContainer) {
+        fileContainer = document.createElement('div');
+        fileContainer.id = 'fileContentContainer';
+        contentArea.appendChild(fileContainer);
+    }
+    
+    // Показываем загрузку
+    fileContainer.innerHTML = `
+        <div style="text-align: center; padding: 40px;">
+            <div class="loader"></div> 
+            <p>Загрузка файла...</p>
+        </div>
+    `;
+    fileContainer.style.display = 'block';
+    
+    try {
+        // Загружаем содержимое файла через AJAX
+        const response = await fetch(`?action=view_file&server=${encodeURIComponent(server)}&file_path=${encodeURIComponent(filePath)}&ajax=1`);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error: ${response.status}`);
         }
+        
+        const html = await response.text();
+        fileContainer.innerHTML = html;
+        
+        // Обновляем путь в заголовке
+        const pathDisplay = document.getElementById('currentPath');
+        if (pathDisplay) {
+            pathDisplay.innerHTML = `<i class="fas fa-file"></i> ${filePath}`;
+        }
+        
+        // Показываем кнопку "Назад к списку"
+        const backButton = document.querySelector('.main-header .back-btn');
+        if (backButton) {
+            backButton.style.visibility = 'visible';
+            backButton.href = `?action=browse&server=${encodeURIComponent(server)}&path=${encodeURIComponent(dirname(filePath))}`;
+            backButton.onclick = function(e) {
+                e.preventDefault();
+                showFileBrowser(server, dirname(filePath));
+            };
+        }
+        
+    } catch (error) {
+        console.error('Error loading file:', error);
+        fileContainer.innerHTML = `
+            <div class="error">
+                <h3>Ошибка загрузки файла</h3>
+                <p>${error.message}</p>
+                <button onclick="showFileBrowser('${server}', '${dirname(filePath)}')" class="back-btn">
+                    <i class="fas fa-arrow-left"></i> Назад к списку файлов
+                </button>
+            </div>
+        `;
+    }
+}
 
-        // Отрисовка простого дерева
-        function renderSimpleTree(container, node, server) {
-            container.innerHTML = '';
-            
+// Функция для получения директории из пути
+function dirname(path) {
+    return path.split('/').slice(0, -1).join('/') || '/';
+}
+
+// Показать файловый браузер
+function showFileBrowser(server, path) {
+    console.log('Showing file browser for path:', path);
+    
+    // Скрываем контейнер с файлом
+    const fileContainer = document.getElementById('fileContentContainer');
+    if (fileContainer) {
+        fileContainer.style.display = 'none';
+    }
+    
+    // Скрываем контейнер со списком всех файлов
+    const filesContainer = document.getElementById('allFilesContainer');
+    if (filesContainer) {
+        filesContainer.style.display = 'none';
+    }
+    
+    // Показываем файловый браузер
+    const fileBrowser = document.getElementById('fileBrowser');
+    if (fileBrowser) {
+        fileBrowser.style.display = 'block';
+        loadDirectory(server, path);
+    }
+    
+    // Обновляем путь в заголовке
+    const pathDisplay = document.getElementById('currentPath');
+    if (pathDisplay) {
+        pathDisplay.innerHTML = `<i class="fas fa-folder"></i> ${path}`;
+    }
+    
+    // Обновляем кнопку "Назад"
+    const backButton = document.querySelector('.main-header .back-btn');
+    if (backButton) {
+        if (path === '<?php echo $startPath; ?>' || path === '/') {
+            backButton.style.visibility = 'hidden';
+        } else {
+            backButton.style.visibility = 'visible';
+            backButton.href = `?action=browse&server=${encodeURIComponent(server)}&path=${encodeURIComponent(dirname(path))}`;
+        }
+    }
+}
+
+// Загрузка дерева
+async function loadTree(server, path) {
+    const treeContainer = document.getElementById('serverTree');
+    if (!treeContainer) return;
+    
+    console.log('Loading tree for path:', path);
+    
+    try {
+        const response = await fetch(`?action=get_tree&server=${encodeURIComponent(server)}&path=${encodeURIComponent(path)}&ajax=1`);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        console.log('Tree data:', data);
+        
+        // Рендерим простое дерево
+        renderSimpleTree(treeContainer, data, server);
+        
+    } catch (error) {
+        console.error('Error loading tree:', error);
+        treeContainer.innerHTML = `<div class="error">Ошибка загрузки дерева: ${error.message}</div>`;
+    }
+}
+
+// Отрисовка простого дерева
+function renderSimpleTree(container, node, server) {
+    container.innerHTML = '';
+    
+    const ul = document.createElement('ul');
+    ul.className = 'simple-tree';
+    
+    // Рендерим детей
+    if (node.children && node.children.length > 0) {
+        node.children.forEach(child => {
+            ul.appendChild(window.createTreeElement(child, server));
+        });
+    } else {
+        const li = document.createElement('li');
+        li.style.padding = '10px';
+        li.style.color = '#718096';
+        li.textContent = 'Нет файлов или папок';
+        ul.appendChild(li);
+    }
+    
+    container.appendChild(ul);
+}
+
+// Переключение директории в простом дереве
+async function toggleSimpleDirectory(item, arrow, li, server) {
+    const childrenContainer = li.querySelector('.tree-children');
+    const isExpanded = childrenContainer.classList.contains('expanded');
+    
+    if (isExpanded) {
+        arrow.innerHTML = '▶';
+        childrenContainer.classList.remove('expanded');
+        childrenContainer.innerHTML = '';
+        return;
+    }
+    
+    // Показываем загрузку
+    arrow.innerHTML = '<span class="loader" style="width: 12px; height: 12px; display: inline-block;"></span>';
+    
+    try {
+        const response = await fetch(`?action=get_tree&server=${encodeURIComponent(server)}&path=${encodeURIComponent(item.path)}&ajax=1`);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        arrow.innerHTML = '▼';
+        childrenContainer.classList.add('expanded');
+        
+        if (data.children && data.children.length > 0) {
             const ul = document.createElement('ul');
             ul.className = 'simple-tree';
+            ul.style.marginLeft = '20px';
             
-            // Рендерим детей
-            if (node.children && node.children.length > 0) {
-                node.children.forEach(child => {
-                    ul.appendChild(window.createTreeElement(child, server));
-                });
-            } else {
-                const li = document.createElement('li');
-                li.style.padding = '10px';
-                li.style.color = '#718096';
-                li.textContent = 'Нет файлов или папок';
-                ul.appendChild(li);
-            }
+            data.children.forEach(child => {
+                const childElement = window.createTreeElement(child, server);
+                ul.appendChild(childElement);
+            });
             
-            container.appendChild(ul);
+            childrenContainer.appendChild(ul);
+        } else {
+            const emptyMsg = document.createElement('div');
+            emptyMsg.style.padding = '5px 10px';
+            emptyMsg.style.color = '#718096';
+            emptyMsg.style.fontSize = '12px';
+            emptyMsg.textContent = 'Папка пуста';
+            childrenContainer.appendChild(emptyMsg);
         }
+        
+    } catch (error) {
+        console.error('Error loading directory:', error);
+        arrow.innerHTML = '▶';
+        
+        const errorMsg = document.createElement('div');
+        errorMsg.style.padding = '5px 10px';
+        errorMsg.style.color = '#e53e3e';
+        errorMsg.style.fontSize = '12px';
+        errorMsg.textContent = 'Ошибка загрузки';
+        childrenContainer.appendChild(errorMsg);
+    }
+}
 
-        // Переключение директории в простом дереве
-        async function toggleSimpleDirectory(item, arrow, li, server) {
-            const childrenContainer = li.querySelector('.tree-children');
-            const isExpanded = childrenContainer.classList.contains('expanded');
-            
-            if (isExpanded) {
-                arrow.innerHTML = '▶';
-                childrenContainer.classList.remove('expanded');
-                childrenContainer.innerHTML = '';
-                return;
+// Загрузка содержимого директории
+function loadDirectory(server, path) {
+    const browser = document.getElementById('fileBrowser');
+    if (!browser) return;
+    
+    console.log('Loading directory:', path);
+    
+    browser.innerHTML = '<div style="text-align: center; padding: 40px;"><div class="loader"></div> Загрузка файлов...</div>';
+    
+    fetch(`?action=browse&server=${encodeURIComponent(server)}&path=${encodeURIComponent(path)}&ajax=1`)
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP error: ${response.status}`);
             }
+            return response.text();
+        })
+        .then(html => {
+            browser.innerHTML = html;
             
-            // Показываем загрузку
-            arrow.innerHTML = '<span class="loader" style="width: 12px; height: 12px; display: inline-block;"></span>';
-            
-            try {
-                const response = await fetch(`?action=get_tree&server=${encodeURIComponent(server)}&path=${encodeURIComponent(item.path)}&ajax=1`);
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP error: ${response.status}`);
-                }
-                
-                const data = await response.json();
-                
-                arrow.innerHTML = '▼';
-                childrenContainer.classList.add('expanded');
-                
-                if (data.children && data.children.length > 0) {
-                    const ul = document.createElement('ul');
-                    ul.className = 'simple-tree';
-                    ul.style.marginLeft = '20px';
+            // Делаем все ссылки в файловом браузере AJAX-запросами
+            const links = browser.querySelectorAll('a.file-item');
+            links.forEach(link => {
+                const href = link.getAttribute('href');
+                if (href.includes('action=view_file')) {
+                    link.onclick = function(e) {
+                        e.preventDefault();
+                        const params = new URLSearchParams(href.split('?')[1]);
+                        const server = params.get('server');
+                        const filePath = params.get('file_path');
+                        const fileName = filePath.split('/').pop();
+                        loadFileContent(server, filePath, fileName);
+                    };
+                } else if (href.includes('action=browse')) {
+                    const params = new URLSearchParams(href.split('?')[1]);
+                    const targetPath = params.get('path');
                     
-                    data.children.forEach(child => {
-                        const childElement = window.createTreeElement(child, server);
-                        ul.appendChild(childElement);
-                    });
-                    
-                    childrenContainer.appendChild(ul);
-                } else {
-                    const emptyMsg = document.createElement('div');
-                    emptyMsg.style.padding = '5px 10px';
-                    emptyMsg.style.color = '#718096';
-                    emptyMsg.style.fontSize = '12px';
-                    emptyMsg.textContent = 'Папка пуста';
-                    childrenContainer.appendChild(emptyMsg);
-                }
-                
-            } catch (error) {
-                console.error('Error loading directory:', error);
-                arrow.innerHTML = '▶';
-                
-                const errorMsg = document.createElement('div');
-                errorMsg.style.padding = '5px 10px';
-                errorMsg.style.color = '#e53e3e';
-                errorMsg.style.fontSize = '12px';
-                errorMsg.textContent = 'Ошибка загрузки';
-                childrenContainer.appendChild(errorMsg);
-            }
-        }
-
-        // Загрузка содержимого директории
-        function loadDirectory(server, path) {
-            const browser = document.getElementById('fileBrowser');
-            if (!browser) return;
-            
-            console.log('Loading directory:', path);
-            
-            browser.innerHTML = '<div style="text-align: center; padding: 40px;"><div class="loader"></div> Загрузка файлов...</div>';
-            
-            fetch(`?action=browse&server=${encodeURIComponent(server)}&path=${encodeURIComponent(path)}&ajax=1`)
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error(`HTTP error: ${response.status}`);
-                    }
-                    return response.text();
-                })
-                .then(html => {
-                    browser.innerHTML = html;
-                    
-                    // Делаем все ссылки в файловом браузере AJAX-запросами
-                    const links = browser.querySelectorAll('a.file-item');
-                    links.forEach(link => {
-                        const href = link.getAttribute('href');
-                        if (href.includes('action=view_file')) {
-                            link.onclick = function(e) {
-                                e.preventDefault();
-                                const params = new URLSearchParams(href.split('?')[1]);
-                                const server = params.get('server');
-                                const filePath = params.get('file_path');
-                                const fileName = filePath.split('/').pop();
-                                loadFileContent(server, filePath, fileName);
-                            };
-                        } else if (href.includes('action=browse')) {
-                            link.onclick = function(e) {
-                                e.preventDefault();
-                                const params = new URLSearchParams(href.split('?')[1]);
-                                const server = params.get('server');
-                                const path = params.get('path');
-                                loadDirectory(server, path);
-                                
-                                // Обновляем путь в заголовке
-                                const pathDisplay = document.getElementById('currentPath');
-                                if (pathDisplay) {
-                                    pathDisplay.innerHTML = `<i class="fas fa-folder"></i> ${path}`;
-                                }
-                                
-                                // Обновляем кнопку "Назад"
-                                const backButton = document.querySelector('.main-header .back-btn');
-                                if (backButton) {
-                                    if (path === '<?php echo $startPath; ?>' || path === '/') {
-                                        backButton.style.visibility = 'hidden';
-                                    } else {
-                                        backButton.style.visibility = 'visible';
-                                        backButton.href = `?action=browse&server=${encodeURIComponent(server)}&path=${encodeURIComponent(dirname(path))}`;
-                                    }
-                                }
-                            };
+                    // Для папок показываем все файлы
+                    link.onclick = function(e) {
+                        e.preventDefault();
+                        loadAllFiles(server, targetPath);
+                        
+                        // Обновляем путь в заголовке
+                        const pathDisplay = document.getElementById('currentPath');
+                        if (pathDisplay) {
+                            pathDisplay.innerHTML = `<i class="fas fa-folder-tree"></i> Все файлы в ${targetPath}`;
                         }
-                    });
-                })
-                .catch(error => {
-                    console.error('Error loading directory:', error);
-                    browser.innerHTML = `<div class="error">Ошибка загрузки: ${error.message}</div>`;
-                });
-        }
+                        
+                        // Обновляем кнопку "Назад"
+                        const backButton = document.querySelector('.main-header .back-btn');
+                        if (backButton) {
+                            backButton.style.visibility = 'visible';
+                            backButton.href = `?action=browse&server=${encodeURIComponent(server)}&path=${encodeURIComponent(dirname(targetPath))}`;
+                        }
+                    };
+                }
+            });
+        })
+        .catch(error => {
+            console.error('Error loading directory:', error);
+            browser.innerHTML = `<div class="error">Ошибка загрузки: ${error.message}</div>`;
+        });
+}
 
-        // Форматирование размера файла
-        function formatSize(bytes) {
-            if (!bytes || bytes === 0 || isNaN(bytes)) return '0 B';
-            
-            bytes = parseInt(bytes);
-            const k = 1024;
-            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-            
-            if (bytes < k) return bytes + ' B';
-            
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return (bytes / Math.pow(k, i)).toFixed(2) + ' ' + sizes[i];
-        }
+// Форматирование размера файла
+function formatSize(bytes) {
+    if (!bytes || bytes === 0 || isNaN(bytes)) return '0 B';
+    
+    bytes = parseInt(bytes);
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    
+    if (bytes < k) return bytes + ' B';
+    
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return (bytes / Math.pow(k, i)).toFixed(2) + ' ' + sizes[i];
+}
+
+// Копирование всех путей файлов
+function copyAllFiles() {
+    const textarea = document.getElementById('allFilesTextarea');
+    if (textarea) {
+        textarea.select();
+        document.execCommand('copy');
+        
+        // Показать уведомление
+        showNotification('Пути файлов скопированы в буфер обмена!');
+    }
+}
+
+// Скачивание списка файлов
+function downloadFileList() {
+    const textarea = document.getElementById('allFilesTextarea');
+    if (textarea) {
+        const content = textarea.value;
+        const blob = new Blob([content], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'files_list.txt';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        // Показать уведомление
+        showNotification('Список файлов скачан!');
+    }
+}
+
+// Показать уведомление
+function showNotification(message) {
+    // Создаем уведомление
+    const notification = document.createElement('div');
+    notification.style.position = 'fixed';
+    notification.style.top = '20px';
+    notification.style.right = '20px';
+    notification.style.backgroundColor = '#38a169';
+    notification.style.color = 'white';
+    notification.style.padding = '15px 20px';
+    notification.style.borderRadius = '5px';
+    notification.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+    notification.style.zIndex = '1000';
+    notification.textContent = message;
+    
+    document.body.appendChild(notification);
+    
+    // Удаляем через 3 секунды
+    setTimeout(() => {
+        notification.remove();
+    }, 3000);
+}
     </script>
 </body>
 </html>
@@ -1167,6 +1386,74 @@ function renderFileContent($fileData, $serverName) {
     }
     
     $html .= '</div>';
+    
+    return $html;
+}
+
+
+
+
+// Добавим функцию для рендеринга списка всех файлов
+function renderAllFilesList($files, $serverName, $path) {
+    $count = count($files);
+    $totalSize = 0;
+    
+    // Подсчитываем общий размер
+    foreach ($files as $file) {
+        if (isset($file['size']) && is_numeric($file['size'])) {
+            $totalSize += $file['size'];
+        }
+    }
+    
+    $html = '
+    <div class="all-files-container">
+        <div class="file-info-card">
+            <h3><i class="fas fa-list"></i> Все файлы в ' . htmlspecialchars($path) . '</h3>
+            <div class="info-grid">
+                <div class="info-item">
+                    <span class="info-label">Файлов:</span>
+                    <span class="info-value">' . $count . '</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Общий размер:</span>
+                    <span class="info-value">' . formatSize($totalSize) . '</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Папка:</span>
+                    <span class="info-value">' . htmlspecialchars($path) . '</span>
+                </div>
+            </div>
+            
+            <div style="margin-top: 15px;">
+                <button onclick="copyAllFiles()" class="btn" style="margin-right: 10px;">
+                    <i class="fas fa-copy"></i> Копировать все пути
+                </button>
+                <button onclick="downloadFileList()" class="btn">
+                    <i class="fas fa-download"></i> Скачать список
+                </button>
+            </div>
+        </div>
+        
+        <div class="files-list-container">
+            <textarea id="allFilesTextarea" class="files-textarea" rows="30" readonly>' . "\n";
+    
+    foreach ($files as $file) {
+        if (isset($file['type']) && $file['type'] === 'info') {
+            $html .= htmlspecialchars($file['path']) . "\n";
+        } else {
+            $filePath = $file['path'] ?? '';
+            $fileSize = $file['size'] ?? 0;
+            $html .= htmlspecialchars($filePath);
+            if ($fileSize > 0) {
+                $html .= ' [' . formatSize($fileSize) . ']';
+            }
+            $html .= "\n";
+        }
+    }
+    
+    $html .= '</textarea>
+        </div>
+    </div>';
     
     return $html;
 }

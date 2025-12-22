@@ -18,3 +18,9 @@ $servers = [
         'password' => 'ваш_пароль'
     ]
 ];
+
+
+
+
+// Стартовая папка
+define('START_PATH', '/var');

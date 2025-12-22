@@ -193,4 +193,69 @@ class SSHManager {
     public function __destruct() {
         $this->disconnect();
     }
+
+
+
+
+    public function listDirectoryRecursive($path, $maxDepth = 10) {
+        $path = $this->sanitizePath($path);
+        
+        // Команда для рекурсивного поиска всех файлов
+        $command = "find " . escapeshellarg($path) . " -type f 2>/dev/null | head -1000";
+        $output = $this->executeCommand($command);
+        
+        $files = explode("\n", trim($output));
+        $result = [];
+        
+        foreach ($files as $file) {
+            $file = trim($file);
+            if (!empty($file)) {
+                $result[] = $file;
+            }
+        }
+        
+        // Если слишком много файлов, ограничиваем
+        if (count($result) > 500) {
+            $result = array_slice($result, 0, 500);
+            $result[] = "... и ещё " . (count($files) - 500) . " файлов";
+        }
+        
+        return $result;
+    }
+    
+    public function listDirectoryTree($path, $maxDepth = 10) {
+        $path = $this->sanitizePath($path);
+        
+        // Команда для получения дерева файлов
+        $command = "find " . escapeshellarg($path) . " -type f 2>/dev/null | head -1000";
+        $output = $this->executeCommand($command);
+        
+        $files = explode("\n", trim($output));
+        $result = [];
+        
+        foreach ($files as $file) {
+            $file = trim($file);
+            if (!empty($file)) {
+                // Получаем информацию о файле
+                $info = $this->getFileInfo($file);
+                $result[] = [
+                    'path' => $file,
+                    'size' => $info['size'] ?? 0,
+                    'type' => $info['type'] ?? 'unknown'
+                ];
+            }
+        }
+        
+        // Если слишком много файлов, ограничиваем
+        if (count($result) > 500) {
+            $result = array_slice($result, 0, 500);
+            $result[] = [
+                'path' => "... и ещё " . (count($files) - 500) . " файлов",
+                'size' => 0,
+                'type' => 'info'
+            ];
+        }
+        
+        return $result;
+    }
 }
