@@ -182,29 +182,63 @@ try {
             $path = $_GET['path'] ?? $startPath;
             
             if ($serverName && isset($_GET['ajax'])) {
-                $ssh = new SSHManager($serverName);
-                $ssh->connect();
-                
-                $files = $ssh->listAllFilesFiltered($path);
-                
-                header('Content-Type: application/json');
-                echo json_encode($files);
-                exit;
+                try {
+                    $ssh = new SSHManager($serverName);
+                    $ssh->connect();
+                    
+                    $files = $ssh->listAllFilesFiltered($path);
+                    
+                    header('Content-Type: application/json');
+                    echo json_encode(['success' => true, 'files' => $files]);
+                    exit;
+                } catch (Exception $e) {
+                    header('Content-Type: application/json');
+                    http_response_code(500);
+                    echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+                    exit;
+                }
             }
             break;
 
             case 'read_multiple_files':
             if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_GET['ajax'])) {
                 $serverName = $_GET['server'] ?? $_SESSION['current_server'] ?? '';
-                $input = json_decode(file_get_contents('php://input'), true);
+                
+                // Читаем JSON тело запроса
+                $jsonInput = file_get_contents('php://input');
+                $input = json_decode($jsonInput, true);
+                
+                if (json_last_error() !== JSON_ERROR_NONE) {
+                    header('Content-Type: application/json');
+                    http_response_code(400);
+                    echo json_encode(['success' => false, 'error' => 'Invalid JSON: ' . json_last_error_msg()]);
+                    exit;
+                }
+                
                 $files = $input['files'] ?? [];
                 
-                if ($serverName && !empty($files)) {
+                if (empty($serverName)) {
+                    header('Content-Type: application/json');
+                    http_response_code(400);
+                    echo json_encode(['success' => false, 'error' => 'Server not specified']);
+                    exit;
+                }
+                
+                if (empty($files)) {
+                    header('Content-Type: application/json');
+                    echo json_encode(['success' => true, 'result' => []]);
+                    exit;
+                }
+                
+                try {
                     $ssh = new SSHManager($serverName);
                     $ssh->connect();
                     
                     $result = [];
                     foreach ($files as $filePath) {
+                        $filePath = trim($filePath);
+                        if (empty($filePath)) continue;
+                        
                         try {
                             $fileData = $ssh->readFile($filePath);
                             $result[$filePath] = $fileData['content'] ?? '';
@@ -214,7 +248,17 @@ try {
                     }
                     
                     header('Content-Type: application/json');
-                    echo json_encode($result, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+                    echo json_encode([
+                        'success' => true,
+                        'result' => $result,
+                        'count' => count($result)
+                    ], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+                    exit;
+                    
+                } catch (Exception $e) {
+                    header('Content-Type: application/json');
+                    http_response_code(500);
+                    echo json_encode(['success' => false, 'error' => $e->getMessage()]);
                     exit;
                 }
             }
@@ -1026,16 +1070,25 @@ async function loadAllFiles(server, path) {
         const response = await fetch(`?action=list_all_files_filtered&server=${encodeURIComponent(server)}&path=${encodeURIComponent(path)}&ajax=1`);
         
         if (!response.ok) {
-            throw new Error(`HTTP error: ${response.status}`);
+            const errorText = await response.text();
+            throw new Error(`HTTP error ${response.status}: ${errorText}`);
         }
         
-        const files = await response.json();
-        console.log('Filtered files data:', files);
+        const result = await response.json();
+        console.log('Filtered files result:', result);
+        
+        if (!result.success) {
+            throw new Error(result.error || 'Unknown error');
+        }
+        
+        const files = result.files || [];
         
         // Формируем содержимое для textarea
         let fileListText = '';
         files.forEach(file => {
-            fileListText += file.path + '\n';
+            if (file && file.path) {
+                fileListText += file.path + '\n';
+            }
         });
         
         filesContainer.innerHTML = `
@@ -1070,6 +1123,7 @@ async function loadAllFiles(server, path) {
                         <ul style="margin: 5px 0 0 20px;">
                             <li>Скрыты файлы/папки, начинающиеся с точки (.*)</li>
                             <li>Применены правила из .gitignore (если есть)</li>
+                            <li>Сортировка: папки → файлы → по алфавиту</li>
                         </ul>
                     </div>
                 </div>
@@ -1139,7 +1193,7 @@ async function loadFilesContent() {
         return;
     }
     
-    console.log('Loading content for', filePaths.length, 'files');
+    console.log('Loading content for', filePaths.length, 'files:', filePaths);
     
     // Получаем сервер из текущего состояния
     const currentServer = '<?php echo escapeOutput($currentServer); ?>';
@@ -1173,15 +1227,32 @@ async function loadFilesContent() {
             })
         });
         
+        console.log('Response status:', response.status);
+        
+        const responseText = await response.text();
+        console.log('Response text:', responseText);
+        
         if (!response.ok) {
-            throw new Error(`HTTP error: ${response.status}`);
+            throw new Error(`HTTP error ${response.status}: ${responseText}`);
         }
         
-        const result = await response.json();
-        console.log('Files content loaded:', result);
+        let result;
+        try {
+            result = JSON.parse(responseText);
+        } catch (e) {
+            console.error('JSON parse error:', e, 'Response:', responseText);
+            throw new Error(`Invalid JSON response: ${e.message}`);
+        }
+        
+        if (!result.success) {
+            throw new Error(result.error || 'Unknown error from server');
+        }
+        
+        const filesResult = result.result || {};
+        console.log('Files content loaded:', filesResult);
         
         // Форматируем результат как JSON
-        const formattedJson = JSON.stringify(result, null, 2);
+        const formattedJson = JSON.stringify(filesResult, null, 2);
         
         if (resultContainer) {
             resultContainer.innerHTML = `
@@ -1190,11 +1261,11 @@ async function loadFilesContent() {
                     <div class="info-grid">
                         <div class="info-item">
                             <span class="info-label">Прочитано файлов:</span>
-                            <span class="info-value">${Object.keys(result).length}</span>
+                            <span class="info-value">${Object.keys(filesResult).length}</span>
                         </div>
                         <div class="info-item">
                             <span class="info-label">Ошибок:</span>
-                            <span class="info-value">${Object.values(result).filter(r => r.error).length}</span>
+                            <span class="info-value">${Object.values(filesResult).filter(r => r && typeof r === 'object' && r.error).length}</span>
                         </div>
                     </div>
                     
@@ -1218,7 +1289,7 @@ async function loadFilesContent() {
             `;
         }
         
-        showNotification(`Успешно прочитано ${Object.keys(result).length} файлов`, 'success');
+        showNotification(`Успешно прочитано ${Object.keys(filesResult).length} файлов`, 'success');
         
     } catch (error) {
         console.error('Error loading files content:', error);
@@ -1227,6 +1298,7 @@ async function loadFilesContent() {
                 <div class="error">
                     <h3>Ошибка чтения файлов</h3>
                     <p>${error.message}</p>
+                    <p style="margin-top: 10px; font-size: 13px;">Проверьте консоль для подробностей</p>
                 </div>
             `;
         }

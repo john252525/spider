@@ -262,6 +262,8 @@ class SSHManager {
 
 
 
+
+    
     public function listAllFilesFiltered($path) {
         $path = $this->sanitizePath($path);
         
@@ -270,33 +272,37 @@ class SSHManager {
         try {
             $gitignorePath = $path . '/.gitignore';
             if ($this->fileExists($gitignorePath)) {
-                $gitignoreContent = $this->executeCommand("cat " . escapeshellarg($gitignorePath));
+                $gitignoreContent = $this->executeCommand("cat " . escapeshellarg($gitignorePath) . " 2>/dev/null || echo ''");
                 $gitignoreRules = $this->parseGitignore($gitignoreContent, $path);
             }
         } catch (Exception $e) {
             // .gitignore не найден или ошибка чтения - игнорируем
         }
         
-        // Команда для рекурсивного поиска всех файлов
-        $command = "find " . escapeshellarg($path) . " -type f 2>/dev/null";
-        $output = $this->executeCommand($command);
+        // Сначала получаем все файлы и папки отдельно для сортировки
+        $commandFiles = "find " . escapeshellarg($path) . " -type f 2>/dev/null";
+        $commandDirs = "find " . escapeshellarg($path) . " -type d 2>/dev/null";
         
-        $files = explode("\n", trim($output));
-        $filteredFiles = [];
+        $filesOutput = $this->executeCommand($commandFiles);
+        $dirsOutput = $this->executeCommand($commandDirs);
         
-        foreach ($files as $file) {
-            $file = trim($file);
-            if (empty($file)) continue;
+        $allItems = [];
+        
+        // Обрабатываем папки
+        $dirs = explode("\n", trim($dirsOutput));
+        foreach ($dirs as $dir) {
+            $dir = trim($dir);
+            if (empty($dir) || $dir === $path) continue;
             
-            // Фильтр 1: скрыть файлы/папки начинающиеся с точки
-            if (preg_match('/\/\.[^\/]+$/', $file) || preg_match('/\/\.[^\/]+\//', $file)) {
+            // Фильтр: скрыть папки начинающиеся с точки
+            if (basename($dir)[0] === '.') {
                 continue;
             }
             
-            // Фильтр 2: применить правила .gitignore
+            // Фильтр: .gitignore правила для папок
             $shouldExclude = false;
             foreach ($gitignoreRules as $pattern) {
-                if (fnmatch($pattern, $file) || fnmatch($pattern . '/*', $file)) {
+                if (fnmatch($pattern, $dir) || fnmatch($pattern . '/*', $dir)) {
                     $shouldExclude = true;
                     break;
                 }
@@ -305,16 +311,74 @@ class SSHManager {
                 continue;
             }
             
-            $filteredFiles[] = ['path' => $file];
+            $allItems[] = [
+                'path' => $dir,
+                'type' => 'directory',
+                'name' => basename($dir)
+            ];
+        }
+        
+        // Обрабатываем файлы
+        $files = explode("\n", trim($filesOutput));
+        foreach ($files as $file) {
+            $file = trim($file);
+            if (empty($file)) continue;
+            
+            // Фильтр: скрыть файлы начинающиеся с точки
+            if (basename($file)[0] === '.') {
+                continue;
+            }
+            
+            // Фильтр: .gitignore правила
+            $shouldExclude = false;
+            foreach ($gitignoreRules as $pattern) {
+                if (fnmatch($pattern, $file)) {
+                    $shouldExclude = true;
+                    break;
+                }
+            }
+            if ($shouldExclude) {
+                continue;
+            }
+            
+            $allItems[] = [
+                'path' => $file,
+                'type' => 'file',
+                'name' => basename($file)
+            ];
+        }
+        
+        // Сортировка: сначала папки, потом файлы, всё по алфавиту
+        usort($allItems, function($a, $b) {
+            // Сначала сортируем по типу (папки перед файлами)
+            if ($a['type'] !== $b['type']) {
+                return $a['type'] === 'directory' ? -1 : 1;
+            }
+            // Затем по имени (регистронезависимо)
+            return strcasecmp($a['name'], $b['name']);
+        });
+        
+        // Преобразуем в простой массив путей (только для файлов, как в textarea)
+        $filePaths = [];
+        foreach ($allItems as $item) {
+            if ($item['type'] === 'file') {
+                $filePaths[] = ['path' => $item['path']];
+            }
         }
         
         // Ограничиваем количество
-        if (count($filteredFiles) > 1000) {
-            $filteredFiles = array_slice($filteredFiles, 0, 1000);
+        if (count($filePaths) > 1000) {
+            $filePaths = array_slice($filePaths, 0, 1000);
         }
         
-        return $filteredFiles;
+        return $filePaths;
     }
+
+
+
+
+
+
     
     private function fileExists($path) {
         $result = trim($this->executeCommand(
