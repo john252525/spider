@@ -1,11 +1,16 @@
 <?php
+
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
+
+
 // Включаем буферизацию вывода для предотвращения случайного вывода перед JSON
 ob_start();
 
 session_start();
 
 // Подключаем модули
-require_once __DIR__ . '/includes/config.php';
+require_once __DIR__ . '/includes/configer.php';
 require_once __DIR__ . '/includes/ssh.php';
 require_once __DIR__ . '/includes/utils.php';
 require_once __DIR__ . '/includes/handlers/api.php';
