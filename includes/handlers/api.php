@@ -69,15 +69,8 @@ class ApiHandler {
             
             $result = $ssh->readMultipleFiles($files);
             
-            // Отправляем JSON без PRETTY_PRINT для больших данных (может вызывать проблемы)
-            echo json_encode([
-                'success' => true,
-                'files' => $result,
-                'total' => count($result),
-                'successful' => count(array_filter($result, function($item) {
-                    return isset($item['success']) && $item['success'] === true;
-                }))
-            ], JSON_UNESCAPED_UNICODE);
+            // Возвращаем простой объект: ключ = путь, значение = контент
+            echo json_encode($result, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
             
         } catch (Exception $e) {
             http_response_code(500);

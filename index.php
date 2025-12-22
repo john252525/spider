@@ -963,7 +963,7 @@ async function loadFilesContent() {
         return;
     }
     
-    console.log('Loading content for', filePaths.length, 'files:', filePaths);
+    console.log('Loading content for', filePaths.length, 'files');
     
     const currentServer = '<?php echo escapeOutput($currentServer); ?>';
     if (!currentServer) {
@@ -994,8 +994,6 @@ async function loadFilesContent() {
             })
         });
         
-        console.log('Response status:', response.status);
-        
         if (!response.ok) {
             const errorText = await response.text();
             throw new Error(`HTTP error ${response.status}: ${errorText}`);
@@ -1004,125 +1002,16 @@ async function loadFilesContent() {
         const result = await response.json();
         console.log('Files content result:', result);
         
-        if (!result.success) {
-            throw new Error(result.error || 'Unknown error');
-        }
-        
-        // Форматируем результат для отображения
-        let htmlContent = `
-            <div class="file-info-card">
-                <h3><i class="fas fa-file-code"></i> Результат чтения файлов</h3>
-                <div class="info-grid">
-                    <div class="info-item">
-                        <span class="info-label">Всего файлов:</span>
-                        <span class="info-value">${result.total || 0}</span>
-                    </div>
-                    <div class="info-item">
-                        <span class="info-label">Успешно прочитано:</span>
-                        <span class="info-value">${result.successful || 0}</span>
-                    </div>
-                    <div class="info-item">
-                        <span class="info-label">Ошибок:</span>
-                        <span class="info-value">${(result.total || 0) - (result.successful || 0)}</span>
-                    </div>
-                </div>
-                
-                <div style="margin-top: 15px;">
-                    <button onclick="copyResultJson()" class="btn" style="margin-right: 10px;">
-                        <i class="fas fa-copy"></i> Копировать JSON
-                    </button>
-                    <button onclick="downloadResultJson()" class="btn">
-                        <i class="fas fa-download"></i> Скачать JSON
-                    </button>
-                </div>
-            </div>
-            
-            <div style="margin-top: 20px;">
-                <div id="filesAccordion"></div>
-            </div>
-            
-            <div style="margin-top: 20px;">
-                <textarea id="resultJsonTextarea" class="files-textarea json-textarea" rows="10" readonly>${escapeHtml(JSON.stringify(result, null, 2))}</textarea>
-            </div>
-        `;
-        
+        // Просто показываем textarea с JSON: ключи = пути, значения = контент
         if (resultContainer) {
-            resultContainer.innerHTML = htmlContent;
-            
-            // Добавляем аккордеон с файлами
-            const accordion = document.getElementById('filesAccordion');
-            if (accordion && result.files) {
-                result.files.forEach((file, index) => {
-                    const fileElement = document.createElement('div');
-                    fileElement.className = 'file-item-card';
-                    fileElement.style.border = '1px solid #e2e8f0';
-                    fileElement.style.borderRadius = '8px';
-                    fileElement.style.marginBottom = '10px';
-                    fileElement.style.overflow = 'hidden';
-                    
-                    const header = document.createElement('div');
-                    header.style.padding = '10px 15px';
-                    header.style.backgroundColor = file.success ? (file.is_binary ? '#fefcbf' : '#c6f6d5') : '#fed7d7';
-                    header.style.cursor = 'pointer';
-                    header.style.display = 'flex';
-                    header.style.justifyContent = 'space-between';
-                    header.style.alignItems = 'center';
-                    
-                    const title = document.createElement('div');
-                    title.style.fontWeight = '500';
-                    title.style.flex = '1';
-                    title.style.overflow = 'hidden';
-                    title.style.textOverflow = 'ellipsis';
-                    title.style.whiteSpace = 'nowrap';
-                    title.innerHTML = `<i class="fas fa-${file.success ? (file.is_binary ? 'file-archive' : 'file-alt') : 'exclamation-circle'}"></i> ${file.path}`;
-                    
-                    const status = document.createElement('div');
-                    status.style.fontSize = '12px';
-                    status.style.color = '#718096';
-                    status.textContent = file.success ? 
-                        (file.is_binary ? `Бинарный, ${formatBytes(file.size)}` : `Текст, ${formatBytes(file.size)}, ${file.lines} строк`) : 
-                        `Ошибка: ${file.error}`;
-                    
-                    header.appendChild(title);
-                    header.appendChild(status);
-                    
-                    const content = document.createElement('div');
-                    content.className = 'file-content-preview';
-                    content.style.display = 'none';
-                    content.style.padding = '15px';
-                    content.style.backgroundColor = '#f7fafc';
-                    content.style.borderTop = '1px solid #e2e8f0';
-                    content.style.maxHeight = '300px';
-                    content.style.overflowY = 'auto';
-                    content.style.fontFamily = "'Fira Code', 'Courier New', monospace";
-                    content.style.fontSize = '13px';
-                    content.style.whiteSpace = 'pre-wrap';
-                    
-                    if (file.success && !file.is_binary && file.content) {
-                        // Обрезаем очень длинный контент
-                        let displayContent = file.content;
-                        if (displayContent.length > 10000) {
-                            displayContent = displayContent.substring(0, 10000) + "\n\n... (содержимое обрезано, файл слишком большой)";
-                        }
-                        content.textContent = displayContent;
-                    } else if (file.success && file.is_binary) {
-                        content.textContent = `⚠️ Бинарный файл. Размер: ${formatBytes(file.size)}`;
-                    } else {
-                        content.textContent = `❌ Ошибка: ${file.error}`;
-                    }
-                    
-                    header.onclick = function() {
-                        content.style.display = content.style.display === 'none' ? 'block' : 'none';
-                    };
-                    
-                    fileElement.appendChild(header);
-                    fileElement.appendChild(content);
-                    accordion.appendChild(fileElement);
-                });
-            }
+            resultContainer.innerHTML = `
+                <div style="margin-top: 20px;">
+                    <textarea id="resultJsonTextarea" class="files-textarea json-textarea" rows="30" readonly>${escapeHtml(JSON.stringify(result, null, 2))}</textarea>
+                </div>
+            `;
         }
         
-        showNotification(`Успешно прочитано ${result.successful || 0} из ${result.total || 0} файлов`, 'success');
+        showNotification(`Прочитано ${Object.keys(result).length} файлов`, 'success');
         
     } catch (error) {
         console.error('Error loading files content:', error);
@@ -1131,7 +1020,6 @@ async function loadFilesContent() {
                 <div class="error">
                     <h3>Ошибка чтения файлов</h3>
                     <p>${error.message}</p>
-                    <pre style="background: #fed7d7; padding: 10px; border-radius: 5px; overflow: auto; max-height: 200px; margin-top: 10px;">${error.stack}</pre>
                 </div>
             `;
         }

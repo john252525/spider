@@ -92,51 +92,20 @@ class SSHManager {
             throw new Exception("Файл не найден или это директория: " . $path);
         }
         
-        try {
-            // Пробуем прочитать файл как текст
-            $content = $this->executeCommand("cat " . escapeshellarg($path) . " 2>&1");
-            
-            // Проверяем, не является ли бинарным файлом
-            if ($this->isBinary($content)) {
-                $size = trim($this->executeCommand("stat -c%s " . escapeshellarg($path) . " 2>/dev/null || echo '0'"));
-                
-                return [
-                    'type' => 'binary',
-                    'content' => null,
-                    'size' => (int)$size,
-                    'path' => $path
-                ];
-            }
-            
-            // Получаем информацию о файле
-            $size = trim($this->executeCommand("stat -c%s " . escapeshellarg($path) . " 2>/dev/null || echo '0'"));
-            $lines = trim($this->executeCommand("wc -l < " . escapeshellarg($path) . " 2>/dev/null || echo '0'"));
-            
-            return [
-                'type' => 'text',
-                'content' => $content,
-                'size' => (int)$size,
-                'lines' => (int)$lines,
-                'path' => $path
-            ];
-            
-        } catch (Exception $e) {
-            // Если не удалось прочитать как текст, возвращаем информацию о бинарном файле
-            $size = trim($this->executeCommand("stat -c%s " . escapeshellarg($path) . " 2>/dev/null || echo '0'"));
-            
-            return [
-                'type' => 'binary',
-                'content' => null,
-                'size' => (int)$size,
-                'path' => $path
-            ];
-        }
-    }
-    
-    private function isBinary($content) {
-        // Проверяем первые 1000 байт на наличие бинарных данных
-        $sample = substr($content, 0, 1000);
-        return preg_match('~[^\x20-\x7E\t\r\n]~', $sample) > 0;
+        // Читаем файл как текст (все файлы читаем как текстовые)
+        $content = $this->executeCommand("cat " . escapeshellarg($path) . " 2>&1");
+        
+        // Получаем информацию о файле
+        $size = trim($this->executeCommand("stat -c%s " . escapeshellarg($path) . " 2>/dev/null || echo '0'"));
+        $lines = trim($this->executeCommand("wc -l < " . escapeshellarg($path) . " 2>/dev/null || echo '0'"));
+        
+        return [
+            'type' => 'text',
+            'content' => $content,
+            'size' => (int)$size,
+            'lines' => (int)$lines,
+            'path' => $path
+        ];
     }
     
     public function listAllFilesFiltered($path) {
@@ -165,6 +134,7 @@ class SSHManager {
     }
     
     public function readMultipleFiles($filePaths) {
+        // Возвращаем простой объект: ключ = путь к файлу, значение = контент
         $results = [];
         
         foreach ($filePaths as $filePath) {
@@ -173,24 +143,10 @@ class SSHManager {
             
             try {
                 $fileData = $this->readFile($filePath);
-                
-                // Формируем структурированный ответ
-                $results[] = [
-                    'path' => $filePath,
-                    'success' => true,
-                    'type' => $fileData['type'] ?? 'unknown',
-                    'size' => $fileData['size'] ?? 0,
-                    'lines' => $fileData['lines'] ?? 0,
-                    'content' => $fileData['content'] ?? null,
-                    'is_binary' => ($fileData['type'] ?? '') === 'binary'
-                ];
-                
+                $results[$filePath] = $fileData['content'] ?? '';
             } catch (Exception $e) {
-                $results[] = [
-                    'path' => $filePath,
-                    'success' => false,
-                    'error' => $e->getMessage()
-                ];
+                // При ошибке сохраняем сообщение об ошибке
+                $results[$filePath] = 'ERROR: ' . $e->getMessage();
             }
         }
         
