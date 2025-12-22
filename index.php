@@ -1,10 +1,15 @@
 <?php
+// Включаем буферизацию вывода для предотвращения случайного вывода перед JSON
+ob_start();
+
 session_start();
 
 // Подключаем модули
 require_once __DIR__ . '/includes/config.php';
 require_once __DIR__ . '/includes/ssh.php';
 require_once __DIR__ . '/includes/utils.php';
+require_once __DIR__ . '/includes/handlers/api.php';
+require_once __DIR__ . '/includes/handlers/renderers.php';
 
 // Инициализация
 $currentView = 'browser';
@@ -31,6 +36,7 @@ try {
                     $currentPath = $startPath;
                     
                     // Редирект
+                    ob_end_clean();
                     header('Location: index.php');
                     exit;
                 }
@@ -48,14 +54,7 @@ try {
                     
                     // Для AJAX запросов возвращаем только содержимое
                     if (isset($_GET['ajax'])) {
-                        $ssh = new SSHManager($serverName);
-                        $ssh->connect();
-                        $listing = $ssh->listDirectory($path);
-                        
-                        // Формируем HTML для файлового браузера
-                        $html = renderFileBrowser($listing, $serverName);
-                        echo $html;
-                        exit;
+                        ApiHandler::handleBrowse($serverName, $path);
                     }
                 }
                 break;
@@ -65,17 +64,16 @@ try {
                 $filePath = $_GET['file_path'] ?? '';
                 
                 if ($serverName && $filePath) {
+                    // Для AJAX запросов возвращаем только содержимое файла
+                    if (isset($_GET['ajax'])) {
+                        ApiHandler::handleViewFile($serverName, $filePath);
+                    }
+                    
+                    // Для обычных запросов сохраняем данные для отображения
                     $ssh = new SSHManager($serverName);
                     $ssh->connect();
                     
                     $fileData = $ssh->readFile($filePath);
-                    
-                    // Для AJAX запросов возвращаем только содержимое файла
-                    if (isset($_GET['ajax'])) {
-                        $html = renderFileContent($fileData, $serverName);
-                        echo $html;
-                        exit;
-                    }
                     
                     $currentView = 'file';
                     $fileContent = $fileData;
@@ -94,66 +92,7 @@ try {
                 $path = $_GET['path'] ?? $startPath;
                 
                 if ($serverName) {
-                    $ssh = new SSHManager($serverName);
-                    $ssh->connect();
-                    $listing = $ssh->listDirectory($path);
-                    
-                    // Формируем данные для дерева
-                    $tree = [
-                        'path' => $path,
-                        'name' => basename($path) ?: $path,
-                        'type' => 'directory',
-                        'children' => []
-                    ];
-                    
-                    $lines = explode("\n", $listing['listing']);
-                    foreach ($lines as $line) {
-                        if (empty($line) || strpos($line, 'total ') === 0) continue;
-                        
-                        $parts = preg_split('/\s+/', $line, 9);
-                        if (count($parts) < 9) continue;
-                        
-                        $perms = $parts[0];
-                        $isDir = $perms[0] === 'd';
-                        $name = $parts[8];
-                        
-                        if ($name === '.' || $name === '..') continue;
-                        
-                        // Фильтр: скрыть файлы/папки начинающиеся с точки
-                        if (strpos($name, '.') === 0) continue;
-                        
-                        // Формируем правильный путь
-                        $fullPath = ($path === '/') ? '/' . $name : $path . '/' . $name;
-                        
-                        if ($isDir) {
-                            $tree['children'][] = [
-                                'path' => $fullPath,
-                                'name' => $name,
-                                'type' => 'directory',
-                                'children' => []
-                            ];
-                        } else {
-                            $tree['children'][] = [
-                                'path' => $fullPath,
-                                'name' => $name,
-                                'type' => 'file',
-                                'size' => $parts[4],
-                                'icon' => getFileIcon($name, false)
-                            ];
-                        }
-                    }
-                    
-                    // Сортировка: сначала папки, потом файлы, всё по алфавиту
-                    usort($tree['children'], function($a, $b) {
-                        if ($a['type'] !== $b['type']) {
-                            return $a['type'] === 'directory' ? -1 : 1;
-                        }
-                        return strcasecmp($a['name'], $b['name']);
-                    });
-                    
-                    header('Content-Type: application/json');
-                    echo json_encode($tree);
-                    exit;
+                    ApiHandler::handleGetTree($serverName, $path, $startPath);
                 }
                 break;
                 
@@ -162,68 +101,20 @@ try {
                 $path = $_GET['path'] ?? $startPath;
                 
                 if ($serverName && isset($_GET['ajax'])) {
-                    try {
-                        $ssh = new SSHManager($serverName);
-                        $ssh->connect();
-                        
-                        $files = $ssh->listAllFilesFiltered($path);
-                        
-                        header('Content-Type: application/json');
-                        echo json_encode(['success' => true, 'files' => $files]);
-                        exit;
-                    } catch (Exception $e) {
-                        header('Content-Type: application/json');
-                        http_response_code(500);
-                        echo json_encode(['success' => false, 'error' => $e->getMessage()]);
-                        exit;
-                    }
+                    ApiHandler::handleListAllFilesFiltered($serverName, $path);
                 }
                 break;
-                
+        }
+    }
+    
+    // Обработка POST запросов
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_GET['action'])) {
+        $action = $_GET['action'];
+        
+        switch ($action) {
             case 'read_multiple_files':
-                if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_GET['ajax'])) {
-                    $serverName = $_GET['server'] ?? $_SESSION['current_server'] ?? '';
-                    
-                    // Читаем JSON тело запроса
-                    $jsonInput = file_get_contents('php://input');
-                    $input = json_decode($jsonInput, true);
-                    
-                    if (json_last_error() !== JSON_ERROR_NONE) {
-                        header('Content-Type: application/json');
-                        http_response_code(400);
-                        echo json_encode(['success' => false, 'error' => 'Invalid JSON: ' . json_last_error_msg()]);
-                        exit;
-                    }
-                    
-                    $files = $input['files'] ?? [];
-                    
-                    if (empty($serverName)) {
-                        header('Content-Type: application/json');
-                        http_response_code(400);
-                        echo json_encode(['success' => false, 'error' => 'Server not specified']);
-                        exit;
-                    }
-                    
-                    try {
-                        $ssh = new SSHManager($serverName);
-                        $ssh->connect();
-                        
-                        $result = $ssh->readMultipleFiles($files);
-                        
-                        header('Content-Type: application/json');
-                        echo json_encode([
-                            'success' => true,
-                            'result' => $result,
-                            'count' => count($result)
-                        ], JSON_UNESCAPED_UNICODE);
-                        exit;
-                        
-                    } catch (Exception $e) {
-                        header('Content-Type: application/json');
-                        http_response_code(500);
-                        echo json_encode(['success' => false, 'error' => $e->getMessage()]);
-                        exit;
-                    }
+                if (isset($_GET['ajax'])) {
+                    ApiHandler::handleReadMultipleFiles();
                 }
                 break;
         }
@@ -242,107 +133,8 @@ try {
     $configError = $e->getMessage();
 }
 
-// Функция для рендеринга файлового браузера
-function renderFileBrowser($listing, $serverName) {
-    $html = '<div class="file-grid">';
-    
-    // Кнопка "Наверх" если не корень
-    if ($listing['current_path'] !== '/') {
-        $parentPath = dirname($listing['current_path']);
-        $html .= '
-        <a href="javascript:void(0)" onclick="loadAllFiles(\'' . htmlspecialchars($serverName) . '\', \'' . htmlspecialchars($parentPath) . '\')" class="file-item">
-            <div class="file-icon">⬆️</div>
-            <div class="file-name">..</div>
-        </a>';
-    }
-    
-    $lines = explode("\n", $listing['listing']);
-    foreach ($lines as $line) {
-        if (empty($line) || strpos($line, 'total ') === 0) continue;
-        
-        $parts = preg_split('/\s+/', $line, 9);
-        if (count($parts) < 9) continue;
-        
-        $perms = $parts[0];
-        $isDir = $perms[0] === 'd';
-        $name = $parts[8];
-        
-        if ($name === '.' || $name === '..') continue;
-        
-        // Фильтр: скрыть файлы/папки начинающиеся с точки
-        if (strpos($name, '.') === 0) continue;
-        
-        $fullPath = ($listing['current_path'] === '/') ? '/' . $name : $listing['current_path'] . '/' . $name;
-        
-        if ($isDir) {
-            $html .= '
-            <a href="javascript:void(0)" onclick="loadAllFiles(\'' . htmlspecialchars($serverName) . '\', \'' . htmlspecialchars($fullPath) . '\')" class="file-item">
-                <div class="file-icon">📁</div>
-                <div class="file-name">' . htmlspecialchars($name) . '</div>
-            </a>';
-        } else {
-            $html .= '
-            <a href="javascript:void(0)" onclick="loadFileContent(\'' . htmlspecialchars($serverName) . '\', \'' . htmlspecialchars($fullPath) . '\', \'' . htmlspecialchars($name) . '\')" class="file-item">
-                <div class="file-icon">' . getFileIcon($name, false) . '</div>
-                <div class="file-name">' . htmlspecialchars($name) . '</div>
-            </a>';
-        }
-    }
-    
-    $html .= '</div>';
-    return $html;
-}
-
-// Функция для рендеринга содержимого файла
-function renderFileContent($fileData, $serverName) {
-    $html = '
-    <div class="file-info-card">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-            <h3 style="margin: 0;">
-                <i class="fas fa-file"></i> 
-                ' . htmlspecialchars(basename($fileData['path'] ?? '')) . '
-            </h3>
-            <button onclick="showFileBrowser(\'' . htmlspecialchars($serverName) . '\', \'' . htmlspecialchars(dirname($fileData['path'])) . '\')" class="back-btn btn-sm">
-                <i class="fas fa-arrow-left"></i> Назад
-            </button>
-        </div>
-        
-        <div class="info-grid">
-            <div class="info-item">
-                <span class="info-label">Путь:</span>
-                <span class="info-value">' . htmlspecialchars(dirname($fileData['path'] ?? '')) . '</span>
-            </div>
-            <div class="info-item">
-                <span class="info-label">Размер:</span>
-                <span class="info-value">' . formatSize($fileData['size'] ?? 0) . '</span>
-            </div>';
-            
-    if (isset($fileData['lines'])) {
-        $html .= '
-            <div class="info-item">
-                <span class="info-label">Строк:</span>
-                <span class="info-value">' . $fileData['lines'] . '</span>
-            </div>';
-    }
-    
-    $html .= '
-        </div>
-    </div>';
-    
-    $html .= '
-    <div class="file-content ' . (($fileData['type'] ?? '') === 'binary' ? 'binary' : '') . '">';
-    
-    if (($fileData['type'] ?? '') === 'binary') {
-        $html .= '⚠️ Это бинарный файл. Не удалось отобразить содержимое.<br>';
-        $html .= 'Размер: ' . formatSize($fileData['size'] ?? 0) . '<br>';
-    } else {
-        $html .= htmlspecialchars($fileData['content'] ?? '');
-    }
-    
-    $html .= '</div>';
-    
-    return $html;
-}
+// Функции рендеринга перенесены в includes/handlers/renderers.php
+// Используем класс Renderer вместо старых функций
 
 // Если это AJAX запрос, выходим
 if (isset($_GET['ajax'])) {
@@ -775,6 +567,36 @@ if (isset($_GET['ajax'])) {
                 height: 300px;
             }
         }
+        
+        /* Дополнительные стили для аккордеона файлов */
+        .file-item-card {
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            overflow: hidden;
+        }
+        
+        .binary-warning {
+            background: #fefcbf;
+            padding: 15px;
+            border-radius: 5px;
+            text-align: center;
+            color: #744210;
+        }
+        
+        .file-content-display {
+            background: #1a202c;
+            color: #cbd5e0;
+            padding: 15px;
+            border-radius: 5px;
+            font-family: 'Fira Code', 'Courier New', monospace;
+            font-size: 13px;
+            line-height: 1.4;
+            white-space: pre-wrap;
+            overflow-x: auto;
+            max-height: 300px;
+            overflow-y: auto;
+        }
     </style>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
@@ -1037,7 +859,9 @@ async function loadAllFiles(server, path) {
         
         let fileListText = '';
         files.forEach(file => {
-            if (file && file.path) {
+            if (file && typeof file === 'string') {
+                fileListText += file + '\n';
+            } else if (file && file.path) {
                 fileListText += file.path + '\n';
             }
         });
@@ -1139,7 +963,7 @@ async function loadFilesContent() {
         return;
     }
     
-    console.log('Loading content for', filePaths.length, 'files');
+    console.log('Loading content for', filePaths.length, 'files:', filePaths);
     
     const currentServer = '<?php echo escapeOutput($currentServer); ?>';
     if (!currentServer) {
@@ -1163,6 +987,7 @@ async function loadFilesContent() {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
+                'Accept': 'application/json'
             },
             body: JSON.stringify({
                 files: filePaths
@@ -1183,41 +1008,121 @@ async function loadFilesContent() {
             throw new Error(result.error || 'Unknown error');
         }
         
-        const filesResult = result.result || {};
-        const formattedJson = JSON.stringify(filesResult, null, 2);
-        
-        if (resultContainer) {
-            resultContainer.innerHTML = `
-                <div class="file-info-card">
-                    <h3><i class="fas fa-file-code"></i> Результат чтения файлов</h3>
-                    <div class="info-grid">
-                        <div class="info-item">
-                            <span class="info-label">Прочитано файлов:</span>
-                            <span class="info-value">${Object.keys(filesResult).length}</span>
-                        </div>
-                        <div class="info-item">
-                            <span class="info-label">Ошибок:</span>
-                            <span class="info-value">${Object.values(filesResult).filter(r => r && typeof r === 'object' && r.error).length}</span>
-                        </div>
+        // Форматируем результат для отображения
+        let htmlContent = `
+            <div class="file-info-card">
+                <h3><i class="fas fa-file-code"></i> Результат чтения файлов</h3>
+                <div class="info-grid">
+                    <div class="info-item">
+                        <span class="info-label">Всего файлов:</span>
+                        <span class="info-value">${result.total || 0}</span>
                     </div>
-                    
-                    <div style="margin-top: 15px;">
-                        <button onclick="copyResultJson()" class="btn" style="margin-right: 10px;">
-                            <i class="fas fa-copy"></i> Копировать JSON
-                        </button>
-                        <button onclick="downloadResultJson()" class="btn">
-                            <i class="fas fa-download"></i> Скачать JSON
-                        </button>
+                    <div class="info-item">
+                        <span class="info-label">Успешно прочитано:</span>
+                        <span class="info-value">${result.successful || 0}</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Ошибок:</span>
+                        <span class="info-value">${(result.total || 0) - (result.successful || 0)}</span>
                     </div>
                 </div>
                 
-                <div style="margin-top: 20px;">
-                    <textarea id="resultJsonTextarea" class="files-textarea json-textarea" rows="20" readonly>${escapeHtml(formattedJson)}</textarea>
+                <div style="margin-top: 15px;">
+                    <button onclick="copyResultJson()" class="btn" style="margin-right: 10px;">
+                        <i class="fas fa-copy"></i> Копировать JSON
+                    </button>
+                    <button onclick="downloadResultJson()" class="btn">
+                        <i class="fas fa-download"></i> Скачать JSON
+                    </button>
                 </div>
-            `;
+            </div>
+            
+            <div style="margin-top: 20px;">
+                <div id="filesAccordion"></div>
+            </div>
+            
+            <div style="margin-top: 20px;">
+                <textarea id="resultJsonTextarea" class="files-textarea json-textarea" rows="10" readonly>${escapeHtml(JSON.stringify(result, null, 2))}</textarea>
+            </div>
+        `;
+        
+        if (resultContainer) {
+            resultContainer.innerHTML = htmlContent;
+            
+            // Добавляем аккордеон с файлами
+            const accordion = document.getElementById('filesAccordion');
+            if (accordion && result.files) {
+                result.files.forEach((file, index) => {
+                    const fileElement = document.createElement('div');
+                    fileElement.className = 'file-item-card';
+                    fileElement.style.border = '1px solid #e2e8f0';
+                    fileElement.style.borderRadius = '8px';
+                    fileElement.style.marginBottom = '10px';
+                    fileElement.style.overflow = 'hidden';
+                    
+                    const header = document.createElement('div');
+                    header.style.padding = '10px 15px';
+                    header.style.backgroundColor = file.success ? (file.is_binary ? '#fefcbf' : '#c6f6d5') : '#fed7d7';
+                    header.style.cursor = 'pointer';
+                    header.style.display = 'flex';
+                    header.style.justifyContent = 'space-between';
+                    header.style.alignItems = 'center';
+                    
+                    const title = document.createElement('div');
+                    title.style.fontWeight = '500';
+                    title.style.flex = '1';
+                    title.style.overflow = 'hidden';
+                    title.style.textOverflow = 'ellipsis';
+                    title.style.whiteSpace = 'nowrap';
+                    title.innerHTML = `<i class="fas fa-${file.success ? (file.is_binary ? 'file-archive' : 'file-alt') : 'exclamation-circle'}"></i> ${file.path}`;
+                    
+                    const status = document.createElement('div');
+                    status.style.fontSize = '12px';
+                    status.style.color = '#718096';
+                    status.textContent = file.success ? 
+                        (file.is_binary ? `Бинарный, ${formatBytes(file.size)}` : `Текст, ${formatBytes(file.size)}, ${file.lines} строк`) : 
+                        `Ошибка: ${file.error}`;
+                    
+                    header.appendChild(title);
+                    header.appendChild(status);
+                    
+                    const content = document.createElement('div');
+                    content.className = 'file-content-preview';
+                    content.style.display = 'none';
+                    content.style.padding = '15px';
+                    content.style.backgroundColor = '#f7fafc';
+                    content.style.borderTop = '1px solid #e2e8f0';
+                    content.style.maxHeight = '300px';
+                    content.style.overflowY = 'auto';
+                    content.style.fontFamily = "'Fira Code', 'Courier New', monospace";
+                    content.style.fontSize = '13px';
+                    content.style.whiteSpace = 'pre-wrap';
+                    
+                    if (file.success && !file.is_binary && file.content) {
+                        // Обрезаем очень длинный контент
+                        let displayContent = file.content;
+                        if (displayContent.length > 10000) {
+                            displayContent = displayContent.substring(0, 10000) + "\n\n... (содержимое обрезано, файл слишком большой)";
+                        }
+                        content.textContent = displayContent;
+                    } else if (file.success && file.is_binary) {
+                        content.textContent = `⚠️ Бинарный файл. Размер: ${formatBytes(file.size)}`;
+                    } else {
+                        content.textContent = `❌ Ошибка: ${file.error}`;
+                    }
+                    
+                    header.onclick = function() {
+                        content.style.display = content.style.display === 'none' ? 'block' : 'none';
+                    };
+                    
+                    fileElement.appendChild(header);
+                    fileElement.appendChild(content);
+                    accordion.appendChild(fileElement);
+                });
+            }
         }
         
-        showNotification(`Успешно прочитано ${Object.keys(filesResult).length} файлов`, 'success');
+        showNotification(`Успешно прочитано ${result.successful || 0} из ${result.total || 0} файлов`, 'success');
         
     } catch (error) {
         console.error('Error loading files content:', error);
@@ -1226,10 +1131,11 @@ async function loadFilesContent() {
                 <div class="error">
                     <h3>Ошибка чтения файлов</h3>
                     <p>${error.message}</p>
+                    <pre style="background: #fed7d7; padding: 10px; border-radius: 5px; overflow: auto; max-height: 200px; margin-top: 10px;">${error.stack}</pre>
                 </div>
             `;
         }
-        showNotification('Ошибка при чтении файлов', 'error');
+        showNotification('Ошибка при чтении файлов: ' + error.message, 'error');
     }
 }
 
@@ -1546,6 +1452,15 @@ function showNotification(message, type = 'success') {
     setTimeout(() => {
         notification.remove();
     }, 3000);
+}
+
+// Вспомогательная функция для форматирования байтов
+function formatBytes(bytes) {
+    if (bytes === 0 || bytes === undefined || bytes === null) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
     </script>
 </body>

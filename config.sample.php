@@ -19,8 +19,5 @@ $servers = [
     ]
 ];
 
-
-
-
 // Стартовая папка
 define('START_PATH', '/var');

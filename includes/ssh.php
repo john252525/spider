@@ -89,35 +89,54 @@ class SSHManager {
         ));
         
         if ($isFile !== '1') {
-            throw new Exception("Файл не найден или это директория");
+            throw new Exception("Файл не найден или это директория: " . $path);
         }
         
         try {
             // Пробуем прочитать файл как текст
-            $content = $this->executeCommand("cat " . escapeshellarg($path));
+            $content = $this->executeCommand("cat " . escapeshellarg($path) . " 2>&1");
+            
+            // Проверяем, не является ли бинарным файлом
+            if ($this->isBinary($content)) {
+                $size = trim($this->executeCommand("stat -c%s " . escapeshellarg($path) . " 2>/dev/null || echo '0'"));
+                
+                return [
+                    'type' => 'binary',
+                    'content' => null,
+                    'size' => (int)$size,
+                    'path' => $path
+                ];
+            }
             
             // Получаем информацию о файле
-            $size = trim($this->executeCommand("stat -c%s " . escapeshellarg($path)));
-            $lines = trim($this->executeCommand("wc -l < " . escapeshellarg($path)));
+            $size = trim($this->executeCommand("stat -c%s " . escapeshellarg($path) . " 2>/dev/null || echo '0'"));
+            $lines = trim($this->executeCommand("wc -l < " . escapeshellarg($path) . " 2>/dev/null || echo '0'"));
             
             return [
                 'type' => 'text',
                 'content' => $content,
-                'size' => $size,
-                'lines' => $lines,
+                'size' => (int)$size,
+                'lines' => (int)$lines,
                 'path' => $path
             ];
             
         } catch (Exception $e) {
             // Если не удалось прочитать как текст, возвращаем информацию о бинарном файле
-            $size = trim($this->executeCommand("stat -c%s " . escapeshellarg($path)));
+            $size = trim($this->executeCommand("stat -c%s " . escapeshellarg($path) . " 2>/dev/null || echo '0'"));
             
             return [
                 'type' => 'binary',
-                'size' => $size,
+                'content' => null,
+                'size' => (int)$size,
                 'path' => $path
             ];
         }
+    }
+    
+    private function isBinary($content) {
+        // Проверяем первые 1000 байт на наличие бинарных данных
+        $sample = substr($content, 0, 1000);
+        return preg_match('~[^\x20-\x7E\t\r\n]~', $sample) > 0;
     }
     
     public function listAllFilesFiltered($path) {
@@ -134,7 +153,7 @@ class SSHManager {
             $file = trim($file);
             if (empty($file)) continue;
             
-            $filteredFiles[] = ['path' => $file];
+            $filteredFiles[] = $file;
         }
         
         // Ограничиваем количество
@@ -154,9 +173,24 @@ class SSHManager {
             
             try {
                 $fileData = $this->readFile($filePath);
-                $results[$filePath] = $fileData['content'] ?? '';
+                
+                // Формируем структурированный ответ
+                $results[] = [
+                    'path' => $filePath,
+                    'success' => true,
+                    'type' => $fileData['type'] ?? 'unknown',
+                    'size' => $fileData['size'] ?? 0,
+                    'lines' => $fileData['lines'] ?? 0,
+                    'content' => $fileData['content'] ?? null,
+                    'is_binary' => ($fileData['type'] ?? '') === 'binary'
+                ];
+                
             } catch (Exception $e) {
-                $results[$filePath] = ['error' => $e->getMessage()];
+                $results[] = [
+                    'path' => $filePath,
+                    'success' => false,
+                    'error' => $e->getMessage()
+                ];
             }
         }
         
@@ -166,8 +200,14 @@ class SSHManager {
     public function getFileInfo($path) {
         $path = $this->sanitizePath($path);
         
-        $info = $this->executeCommand("stat -c '%n|%s|%U|%G|%a|%y' " . escapeshellarg($path));
-        list($name, $size, $owner, $group, $perms, $mtime) = explode('|', trim($info));
+        $info = $this->executeCommand("stat -c '%n|%s|%U|%G|%a|%y' " . escapeshellarg($path) . " 2>&1");
+        $parts = explode('|', trim($info));
+        
+        if (count($parts) < 6) {
+            throw new Exception("Не удалось получить информацию о файле");
+        }
+        
+        list($name, $size, $owner, $group, $perms, $mtime) = $parts;
         
         $type = trim($this->executeCommand(
             "if [ -d " . escapeshellarg($path) . " ]; then echo 'directory'; " .
