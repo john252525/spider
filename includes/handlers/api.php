@@ -279,7 +279,7 @@ class ApiHandler {
             'Content-Type: application/json',
             'Accept: application/json'
         ]);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 3600);  // 30
         
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -309,7 +309,20 @@ class ApiHandler {
      * Обработка через DeepSeek API
      */
     private static function processWithDeepSeek($jsonData, $prompt) {
-        $apiKey = Config::getDeepSeekApiKey();
+        $config = Config::getDeepSeekConfig();
+        if (!$config) {
+            throw new Exception('DeepSeek не настроен в конфигурации');
+        }
+        
+        $apiKey = $config['api_key'];
+        $apiUrl = $config['api_url'];
+        $model = $config['model'];
+        $systemPrompt = $config['system_prompt'];
+        $maxTokens = $config['max_tokens'];
+        $temperature = $config['temperature'];
+        $timeout = $config['timeout'];
+        $topP = $config['top_p'];
+        
         if (empty($apiKey)) {
             throw new Exception('DeepSeek API ключ не настроен в конфигурации');
         }
@@ -317,31 +330,37 @@ class ApiHandler {
         // Формируем промпт для DeepSeek
         $fullPrompt = "У меня есть JSON с содержимым файлов:\n\n" . $jsonData . "\n\n" . $prompt . "\n\nВерни результат в виде валидного JSON, где ключи - пути к файлам, а значения - измененное содержимое этих файлов.";
         
-        // Отправляем запрос к DeepSeek API
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, 'https://api.deepseek.com/v1/chat/completions');
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode([
-            'model' => 'deepseek-chat',
+        // Подготавливаем данные для запроса
+        $requestData = [
+            'model' => $model,
             'messages' => [
                 [
                     'role' => 'system',
-                    'content' => 'Ты - помощник для обработки файлов. Ты получаешь JSON с содержимым файлов и инструкцию по их изменению. Ты всегда возвращаешь результат в виде валидного JSON, где ключи - пути к файлам, а значения - измененное содержимое этих файлов.'
+                    'content' => $systemPrompt
                 ],
                 [
                     'role' => 'user',
                     'content' => $fullPrompt
                 ]
             ],
-            'temperature' => 0.1,
-            'max_tokens' => 4000
-        ]));
+            'temperature' => $temperature,
+            'max_tokens' => $maxTokens,
+            'top_p' => $topP
+        ];
+        
+        // Отправляем запрос к DeepSeek API
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $apiUrl);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($requestData));
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_HTTPHEADER, [
-            'Content-Type: application/json',
-            'Authorization: Bearer ' . $apiKey
+            'Content-Type: ' . 'application/json',
+            'Authorization: Bearer ' . $apiKey,
+            'Accept: application/json'
         ]);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 60);
+        curl_setopt($ch, CURLOPT_TIMEOUT, $timeout);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 30);
         
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -357,7 +376,11 @@ class ApiHandler {
         }
         
         $parsedResponse = json_decode($response, true);
+        
         if (!isset($parsedResponse['choices'][0]['message']['content'])) {
+            if (isset($parsedResponse['error']['message'])) {
+                throw new Exception('DeepSeek API error: ' . $parsedResponse['error']['message']);
+            }
             throw new Exception('Invalid DeepSeek response format');
         }
         
