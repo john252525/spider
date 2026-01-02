@@ -201,6 +201,7 @@ class ApiHandler {
             
             $jsonData = $input['json_data'] ?? '';
             $prompt = $input['prompt'] ?? '';
+            $aiModel = $input['ai_model'] ?? 'default';
             
             if (empty($jsonData)) {
                 http_response_code(400);
@@ -220,45 +221,11 @@ class ApiHandler {
                 exit;
             }
             
-            // Подготавливаем запрос для нейросети
-            $question = $jsonData . "\n\n" . $prompt;
-            
-            // Получаем URL API из конфигурации
-            $apiUrl = Config::getAiApiUrl();
-            
-            // Отправляем запрос к нейросети
-            $ch = curl_init();
-            curl_setopt($ch, CURLOPT_URL, $apiUrl);
-            curl_setopt($ch, CURLOPT_POST, true);
-            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode(['question' => $question]));
-            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-            curl_setopt($ch, CURLOPT_HTTPHEADER, [
-                'Content-Type: application/json',
-                'Accept: application/json'
-            ]);
-            curl_setopt($ch, CURLOPT_TIMEOUT, 30);
-            
-            $response = curl_exec($ch);
-            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            $error = curl_error($ch);
-            curl_close($ch);
-            
-            if ($error) {
-                throw new Exception('CURL error: ' . $error);
-            }
-            
-            if ($httpCode !== 200) {
-                throw new Exception('AI API returned HTTP code: ' . $httpCode . '. Response: ' . $response);
-            }
-            
-            // Парсим ответ (может быть JSON или простой текст)
-            $parsedResponse = json_decode($response, true);
-            if (json_last_error() === JSON_ERROR_NONE && isset($parsedResponse['answer'])) {
-                $result = $parsedResponse['answer'];
-            } else if (json_last_error() === JSON_ERROR_NONE && isset($parsedResponse['response'])) {
-                $result = $parsedResponse['response'];
+            // Обработка в зависимости от выбранной модели
+            if ($aiModel === 'deepseek') {
+                $result = self::processWithDeepSeek($jsonData, $prompt);
             } else {
-                $result = $response;
+                $result = self::processWithDefaultAI($jsonData, $prompt);
             }
             
             // Проверяем, является ли результат валидным JSON (чтобы можно было использовать для записи файлов)
@@ -266,15 +233,18 @@ class ApiHandler {
             if (json_last_error() === JSON_ERROR_NONE) {
                 // Если ответ - валидный JSON, возвращаем его
                 $output = $result;
+                $isJson = true;
             } else {
                 // Иначе возвращаем как есть
                 $output = $result;
+                $isJson = false;
             }
             
             echo json_encode([
                 'success' => true,
                 'result' => $output,
-                'is_json' => (json_last_error() === JSON_ERROR_NONE)
+                'is_json' => $isJson,
+                'model' => $aiModel
             ], JSON_UNESCAPED_UNICODE);
             
         } catch (Exception $e) {
@@ -287,6 +257,111 @@ class ApiHandler {
         }
         
         exit;
+    }
+    
+    /**
+     * Обработка через стандартную нейросеть
+     */
+    private static function processWithDefaultAI($jsonData, $prompt) {
+        // Подготавливаем запрос для нейросети
+        $question = $jsonData . "\n\n" . $prompt;
+        
+        // Получаем URL API из конфигурации
+        $apiUrl = Config::getAiApiUrl();
+        
+        // Отправляем запрос к нейросети
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $apiUrl);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode(['question' => $question]));
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, [
+            'Content-Type: application/json',
+            'Accept: application/json'
+        ]);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+        
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error = curl_error($ch);
+        curl_close($ch);
+        
+        if ($error) {
+            throw new Exception('CURL error: ' . $error);
+        }
+        
+        if ($httpCode !== 200) {
+            throw new Exception('AI API returned HTTP code: ' . $httpCode . '. Response: ' . $response);
+        }
+        
+        // Парсим ответ (может быть JSON или простой текст)
+        $parsedResponse = json_decode($response, true);
+        if (json_last_error() === JSON_ERROR_NONE && isset($parsedResponse['answer'])) {
+            return $parsedResponse['answer'];
+        } else if (json_last_error() === JSON_ERROR_NONE && isset($parsedResponse['response'])) {
+            return $parsedResponse['response'];
+        } else {
+            return $response;
+        }
+    }
+    
+    /**
+     * Обработка через DeepSeek API
+     */
+    private static function processWithDeepSeek($jsonData, $prompt) {
+        $apiKey = Config::getDeepSeekApiKey();
+        if (empty($apiKey)) {
+            throw new Exception('DeepSeek API ключ не настроен в конфигурации');
+        }
+        
+        // Формируем промпт для DeepSeek
+        $fullPrompt = "У меня есть JSON с содержимым файлов:\n\n" . $jsonData . "\n\n" . $prompt . "\n\nВерни результат в виде валидного JSON, где ключи - пути к файлам, а значения - измененное содержимое этих файлов.";
+        
+        // Отправляем запрос к DeepSeek API
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, 'https://api.deepseek.com/v1/chat/completions');
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode([
+            'model' => 'deepseek-chat',
+            'messages' => [
+                [
+                    'role' => 'system',
+                    'content' => 'Ты - помощник для обработки файлов. Ты получаешь JSON с содержимым файлов и инструкцию по их изменению. Ты всегда возвращаешь результат в виде валидного JSON, где ключи - пути к файлам, а значения - измененное содержимое этих файлов.'
+                ],
+                [
+                    'role' => 'user',
+                    'content' => $fullPrompt
+                ]
+            ],
+            'temperature' => 0.1,
+            'max_tokens' => 4000
+        ]));
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, [
+            'Content-Type: application/json',
+            'Authorization: Bearer ' . $apiKey
+        ]);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 60);
+        
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error = curl_error($ch);
+        curl_close($ch);
+        
+        if ($error) {
+            throw new Exception('DeepSeek CURL error: ' . $error);
+        }
+        
+        if ($httpCode !== 200) {
+            throw new Exception('DeepSeek API returned HTTP code: ' . $httpCode . '. Response: ' . $response);
+        }
+        
+        $parsedResponse = json_decode($response, true);
+        if (!isset($parsedResponse['choices'][0]['message']['content'])) {
+            throw new Exception('Invalid DeepSeek response format');
+        }
+        
+        return $parsedResponse['choices'][0]['message']['content'];
     }
     
     /**

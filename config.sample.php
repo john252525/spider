@@ -24,3 +24,5 @@ define('START_PATH', '/var');
 
 // API для нейросети
 define('AI_API_URL', 'https://...');  // POST {"question":"TEXT"}
+// API ключ для DeepSeek
+define('DEEPSEEK_API_KEY', 'your-deepseek-api-key-here');

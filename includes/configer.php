@@ -27,6 +27,10 @@ class Config {
             if (defined('AI_API_URL')) {
                 self::$config['ai_api_url'] = AI_API_URL;
             }
+            
+            if (defined('DEEPSEEK_API_KEY')) {
+                self::$config['deepseek_api_key'] = DEEPSEEK_API_KEY;
+            }
         }
         
         return self::$config;
@@ -45,5 +49,10 @@ class Config {
     public static function getAiApiUrl() {
         $config = self::load();
         return $config['ai_api_url'] ?? 'https://api22222.apitter.com/v1/ai/api.php';
+    }
+    
+    public static function getDeepSeekApiKey() {
+        $config = self::load();
+        return $config['deepseek_api_key'] ?? '';
     }
 }

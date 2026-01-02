@@ -1169,6 +1169,7 @@ async function loadFilesContent() {
                                 </label>
                                 <select id="aiSelect" class="ai-select">
                                     <option value="default" selected>Основная нейросеть</option>
+                                    <option value="deepseek">DeepSeek</option>
                                     <option value="gpt">GPT</option>
                                     <option value="claude">Claude</option>
                                 </select>
