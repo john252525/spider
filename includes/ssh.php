@@ -202,17 +202,19 @@ class SSHManager {
             $this->executeCommand("mkdir -p " . escapeshellarg($dir));
         }
         
-        // Экранируем содержимое для безопасной записи через echo
-        $escapedContent = str_replace(["'", "`", "$", "\""], ["'\''", "\`", "\$", "\""], $content);
+        // Создаем временный файл на локальной машине
+        $tempFile = tempnam(sys_get_temp_dir(), 'ssh_write_');
+        file_put_contents($tempFile, $content);
         
-        // Записываем файл
-        $command = sprintf(
-            "cat > %s << 'EOF'\n%s\nEOF",
-            escapeshellarg($path),
-            $content
-        );
+        // Передаем файл на сервер через SCP
+        $scpResult = ssh2_scp_send($this->connection, $tempFile, $path, 0644);
         
-        $output = $this->executeCommand($command);
+        // Удаляем временный файл
+        unlink($tempFile);
+        
+        if (!$scpResult) {
+            throw new Exception("Не удалось записать файл: " . $path);
+        }
         
         // Проверяем, что файл был создан
         $checkFile = trim($this->executeCommand(
