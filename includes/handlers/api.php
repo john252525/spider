@@ -163,6 +163,133 @@ class ApiHandler {
     }
     
     /**
+     * Обработка запроса на обработку через нейросеть
+     */
+    public static function handleAiProcess() {
+        // Очищаем любой вывод перед отправкой JSON
+        if (ob_get_level()) {
+            ob_clean();
+        } else {
+            ob_start();
+        }
+        
+        // Устанавливаем заголовки
+        header('Content-Type: application/json; charset=utf-8');
+        
+        try {
+            // Читаем JSON тело запроса
+            $jsonInput = file_get_contents('php://input');
+            if (empty($jsonInput)) {
+                http_response_code(400);
+                echo json_encode([
+                    'success' => false,
+                    'error' => 'Empty request body'
+                ], JSON_UNESCAPED_UNICODE);
+                exit;
+            }
+            
+            $input = json_decode($jsonInput, true);
+            
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                http_response_code(400);
+                echo json_encode([
+                    'success' => false,
+                    'error' => 'Invalid JSON: ' . json_last_error_msg()
+                ], JSON_UNESCAPED_UNICODE);
+                exit;
+            }
+            
+            $jsonData = $input['json_data'] ?? '';
+            $prompt = $input['prompt'] ?? '';
+            
+            if (empty($jsonData)) {
+                http_response_code(400);
+                echo json_encode([
+                    'success' => false,
+                    'error' => 'JSON data is empty'
+                ], JSON_UNESCAPED_UNICODE);
+                exit;
+            }
+            
+            if (empty($prompt)) {
+                http_response_code(400);
+                echo json_encode([
+                    'success' => false,
+                    'error' => 'Prompt is empty'
+                ], JSON_UNESCAPED_UNICODE);
+                exit;
+            }
+            
+            // Подготавливаем запрос для нейросети
+            $question = $jsonData . "\n\n" . $prompt;
+            
+            // Получаем URL API из конфигурации
+            $apiUrl = Config::getAiApiUrl();
+            
+            // Отправляем запрос к нейросети
+            $ch = curl_init();
+            curl_setopt($ch, CURLOPT_URL, $apiUrl);
+            curl_setopt($ch, CURLOPT_POST, true);
+            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode(['question' => $question]));
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_HTTPHEADER, [
+                'Content-Type: application/json',
+                'Accept: application/json'
+            ]);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+            
+            $response = curl_exec($ch);
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $error = curl_error($ch);
+            curl_close($ch);
+            
+            if ($error) {
+                throw new Exception('CURL error: ' . $error);
+            }
+            
+            if ($httpCode !== 200) {
+                throw new Exception('AI API returned HTTP code: ' . $httpCode . '. Response: ' . $response);
+            }
+            
+            // Парсим ответ (может быть JSON или простой текст)
+            $parsedResponse = json_decode($response, true);
+            if (json_last_error() === JSON_ERROR_NONE && isset($parsedResponse['answer'])) {
+                $result = $parsedResponse['answer'];
+            } else if (json_last_error() === JSON_ERROR_NONE && isset($parsedResponse['response'])) {
+                $result = $parsedResponse['response'];
+            } else {
+                $result = $response;
+            }
+            
+            // Проверяем, является ли результат валидным JSON (чтобы можно было использовать для записи файлов)
+            $jsonResult = json_decode($result, true);
+            if (json_last_error() === JSON_ERROR_NONE) {
+                // Если ответ - валидный JSON, возвращаем его
+                $output = $result;
+            } else {
+                // Иначе возвращаем как есть
+                $output = $result;
+            }
+            
+            echo json_encode([
+                'success' => true,
+                'result' => $output,
+                'is_json' => (json_last_error() === JSON_ERROR_NONE)
+            ], JSON_UNESCAPED_UNICODE);
+            
+        } catch (Exception $e) {
+            http_response_code(500);
+            echo json_encode([
+                'success' => false,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ], JSON_UNESCAPED_UNICODE);
+        }
+        
+        exit;
+    }
+    
+    /**
      * Обработка запроса на получение дерева файлов
      */
     public static function handleGetTree($serverName, $path, $startPath) {

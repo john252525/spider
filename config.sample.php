@@ -21,3 +21,6 @@ $servers = [
 
 // Стартовая папка
 define('START_PATH', '/var');
+
+// API для нейросети
+define('AI_API_URL', 'https://...');  // POST {"question":"TEXT"}

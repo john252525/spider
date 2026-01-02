@@ -128,6 +128,12 @@ try {
                     ApiHandler::handleWriteMultipleFiles();
                 }
                 break;
+                
+            case 'ai_process':
+                if (isset($_GET['ajax'])) {
+                    ApiHandler::handleAiProcess();
+                }
+                break;
         }
     }
     
@@ -635,6 +641,82 @@ if (isset($_GET['ajax'])) {
             color: #d69e2e;
             margin-right: 8px;
         }
+        
+        /* Стили для нейросети */
+        .ai-container {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f7fafc;
+            border-radius: 8px;
+            border: 1px solid #e2e8f0;
+        }
+        
+        .ai-container h3 {
+            margin-bottom: 15px;
+            color: #2d3748;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .ai-form {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        
+        .ai-select {
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid #e2e8f0;
+            font-size: 14px;
+            background: white;
+        }
+        
+        .ai-prompt-textarea {
+            width: 100%;
+            padding: 15px;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-size: 14px;
+            line-height: 1.5;
+            background: white;
+            color: #2d3748;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            resize: vertical;
+            min-height: 100px;
+        }
+        
+        .ai-prompt-textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .ai-result-textarea {
+            font-family: 'Fira Code', 'Courier New', monospace;
+            background: #1a202c;
+            color: #cbd5e0;
+            border: 2px solid #4a5568;
+        }
+        
+        .ai-submit-btn {
+            background: #805ad5;
+            align-self: flex-start;
+        }
+        
+        .ai-submit-btn:hover {
+            background: #6b46c1;
+        }
+        
+        .ai-write-btn {
+            background: #38a169;
+            border-color: #38a169;
+        }
+        
+        .ai-write-btn:hover {
+            background: #2f855a;
+            border-color: #2f855a;
+        }
     </style>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
@@ -765,6 +847,7 @@ if (isset($_GET['ajax'])) {
                             <p><i class="fas fa-check-circle"></i> Навигация по дереву файлов</p>
                             <p><i class="fas fa-check-circle"></i> Просмотр текстовых файлов</p>
                             <p><i class="fas fa-check-circle"></i> Массовое чтение и запись файлов</p>
+                            <p><i class="fas fa-check-circle"></i> Интеграция с нейросетью</p>
                         </div>
                     </div>
                 <?php endif; ?>
@@ -1040,7 +1123,7 @@ async function loadFilesContent() {
         const result = await response.json();
         console.log('Files content result:', result);
         
-        // Показываем textarea с JSON и добавляем кнопки для записи файлов
+        // Показываем textarea с JSON и добавляем кнопки для записи файлов и нейросети
         if (resultContainer) {
             resultContainer.innerHTML = `
                 <div>
@@ -1075,6 +1158,50 @@ async function loadFilesContent() {
                         
                         <div id="writeFilesResult" style="margin-top: 20px; display: none;"></div>
                     </div>
+                    
+                    <div class="ai-container">
+                        <h3><i class="fas fa-robot"></i> Обработка через нейросеть</h3>
+                        
+                        <div class="ai-form">
+                            <div>
+                                <label for="aiSelect" style="display: block; margin-bottom: 5px; font-weight: 500;">
+                                    Нейросеть:
+                                </label>
+                                <select id="aiSelect" class="ai-select">
+                                    <option value="default" selected>Основная нейросеть</option>
+                                    <option value="gpt">GPT</option>
+                                    <option value="claude">Claude</option>
+                                </select>
+                            </div>
+                            
+                            <div>
+                                <label for="aiPromptTextarea" style="display: block; margin-bottom: 5px; font-weight: 500;">
+                                    Prompt (инструкция для нейросети):
+                                </label>
+                                <textarea id="aiPromptTextarea" class="ai-prompt-textarea" placeholder="Например: 'Исправь ошибки в коде', 'Добавь комментарии', 'Оптимизируй производительность', 'Переведи на английский' и т.д."></textarea>
+                            </div>
+                            
+                            <button onclick="processWithAI()" class="btn ai-submit-btn">
+                                <i class="fas fa-magic"></i> Обработать через нейросеть
+                            </button>
+                        </div>
+                        
+                        <div id="aiResultContainer" style="margin-top: 20px; display: none;">
+                            <label for="aiResultTextarea" style="display: block; margin-bottom: 5px; font-weight: 500;">
+                                Результат обработки:
+                            </label>
+                            <textarea id="aiResultTextarea" class="files-textarea ai-result-textarea" rows="20" placeholder="Здесь появится результат обработки нейросетью..."></textarea>
+                            
+                            <div style="margin-top: 15px;">
+                                <button onclick="copyAiResult()" class="btn" style="margin-right: 10px;">
+                                    <i class="fas fa-copy"></i> Копировать результат
+                                </button>
+                                <button onclick="useAiResultForWriting()" class="btn ai-write-btn">
+                                    <i class="fas fa-save"></i> Записать файлы на сервер
+                                </button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             `;
         }
@@ -1092,6 +1219,233 @@ async function loadFilesContent() {
             `;
         }
         showNotification('Ошибка при чтении файлов: ' + error.message, 'error');
+    }
+}
+
+async function processWithAI() {
+    const jsonTextarea = document.getElementById('resultJsonTextarea');
+    const promptTextarea = document.getElementById('aiPromptTextarea');
+    
+    if (!jsonTextarea) {
+        showNotification('Ошибка: JSON textarea не найден', 'error');
+        return;
+    }
+    
+    if (!promptTextarea) {
+        showNotification('Ошибка: Prompt textarea не найден', 'error');
+        return;
+    }
+    
+    const jsonData = jsonTextarea.value;
+    const prompt = promptTextarea.value.trim();
+    
+    if (!jsonData) {
+        showNotification('Ошибка: JSON данные пустые', 'error');
+        return;
+    }
+    
+    if (!prompt) {
+        showNotification('Ошибка: Введите prompt для нейросети', 'error');
+        return;
+    }
+    
+    const aiSelect = document.getElementById('aiSelect');
+    const selectedAI = aiSelect ? aiSelect.value : 'default';
+    
+    console.log('Processing with AI:', selectedAI, 'Prompt length:', prompt.length);
+    
+    const resultContainer = document.getElementById('aiResultContainer');
+    if (resultContainer) {
+        resultContainer.style.display = 'block';
+        const aiResultTextarea = document.getElementById('aiResultTextarea');
+        if (aiResultTextarea) {
+            aiResultTextarea.value = '';
+            aiResultTextarea.placeholder = 'Обработка через нейросеть...';
+        }
+    }
+    
+    try {
+        const response = await fetch(`?action=ai_process&ajax=1`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            },
+            body: JSON.stringify({
+                json_data: jsonData,
+                prompt: prompt,
+                ai_model: selectedAI
+            })
+        });
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`HTTP error ${response.status}: ${errorText}`);
+        }
+        
+        const result = await response.json();
+        console.log('AI process result:', result);
+        
+        if (!result.success) {
+            throw new Error(result.error || 'Ошибка обработки нейросетью');
+        }
+        
+        const aiResultTextarea = document.getElementById('aiResultTextarea');
+        if (aiResultTextarea) {
+            aiResultTextarea.value = result.result || '';
+            aiResultTextarea.placeholder = 'Результат обработки нейросетью';
+        }
+        
+        showNotification('Обработка нейросетью завершена успешно!', 'success');
+        
+        // Прокручиваем к результату
+        if (resultContainer) {
+            resultContainer.scrollIntoView({ behavior: 'smooth' });
+        }
+        
+    } catch (error) {
+        console.error('Error processing with AI:', error);
+        
+        const aiResultTextarea = document.getElementById('aiResultTextarea');
+        if (aiResultTextarea) {
+            aiResultTextarea.value = `Ошибка при обработке нейросетью: ${error.message}`;
+        }
+        
+        showNotification('Ошибка при обработке нейросетью: ' + error.message, 'error');
+    }
+}
+
+function copyAiResult() {
+    const textarea = document.getElementById('aiResultTextarea');
+    if (textarea) {
+        textarea.select();
+        document.execCommand('copy');
+        showNotification('Результат нейросети скопирован в буфер обмена!', 'success');
+    }
+}
+
+function useAiResultForWriting() {
+    const aiResultTextarea = document.getElementById('aiResultTextarea');
+    if (!aiResultTextarea) {
+        showNotification('Ошибка: Результат нейросети не найден', 'error');
+        return;
+    }
+    
+    const aiResult = aiResultTextarea.value.trim();
+    if (!aiResult) {
+        showNotification('Ошибка: Результат нейросети пустой', 'error');
+        return;
+    }
+    
+    // Пытаемся парсить как JSON
+    try {
+        const parsedJson = JSON.parse(aiResult);
+        // Если это валидный JSON, используем его для записи
+        writeAiFilesContent(parsedJson);
+    } catch (e) {
+        // Если не JSON, показываем ошибку
+        showNotification('Ошибка: Результат нейросети не является валидным JSON', 'error');
+    }
+}
+
+async function writeAiFilesContent(jsonData) {
+    try {
+        if (typeof jsonData !== 'object' || jsonData === null) {
+            showNotification('Некорректный JSON формат', 'error');
+            return;
+        }
+        
+        const currentServer = '<?php echo escapeOutput($currentServer); ?>';
+        if (!currentServer) {
+            showNotification('Ошибка: сервер не выбран', 'error');
+            return;
+        }
+        
+        console.log('Writing AI files:', Object.keys(jsonData).length, 'files');
+        
+        // Создаем контейнер для результатов
+        let resultContainer = document.getElementById('writeFilesResult');
+        if (!resultContainer) {
+            resultContainer = document.createElement('div');
+            resultContainer.id = 'writeFilesResult';
+            const aiContainer = document.querySelector('.ai-container');
+            if (aiContainer) {
+                aiContainer.appendChild(resultContainer);
+            }
+        }
+        
+        resultContainer.style.display = 'block';
+        resultContainer.innerHTML = `
+            <div style="text-align: center; padding: 20px;">
+                <div class="loader"></div> 
+                <p>Запись файлов на сервер...</p>
+            </div>
+        `;
+        
+        // Отправляем запрос на запись файлов
+        const response = await fetch(`?action=write_multiple_files&server=${encodeURIComponent(currentServer)}&ajax=1`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            },
+            body: JSON.stringify({
+                files: jsonData
+            })
+        });
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`HTTP error ${response.status}: ${errorText}`);
+        }
+        
+        const result = await response.json();
+        console.log('Write AI files result:', result);
+        
+        // Анализируем результат
+        let successCount = 0;
+        let errorCount = 0;
+        let resultHtml = '<div class="file-info-card"><h4>Результат записи файлов:</h4>';
+        
+        for (const [filePath, fileResult] of Object.entries(result)) {
+            if (fileResult.success) {
+                successCount++;
+                resultHtml += `<div style="color: #38a169; margin: 5px 0;">✓ ${escapeHtml(filePath)}: ${fileResult.message || 'Успешно'}</div>`;
+            } else {
+                errorCount++;
+                resultHtml += `<div style="color: #e53e3e; margin: 5px 0;">✗ ${escapeHtml(filePath)}: ${fileResult.error || 'Ошибка'}</div>`;
+            }
+        }
+        
+        resultHtml += `</div>`;
+        
+        if (resultContainer) {
+            resultContainer.innerHTML = resultHtml;
+        }
+        
+        // Прокручиваем к результату
+        if (resultContainer) {
+            resultContainer.scrollIntoView({ behavior: 'smooth' });
+        }
+        
+        showNotification(`Записано файлов: ${successCount} успешно, ${errorCount} с ошибками`, 
+            errorCount === 0 ? 'success' : 'warning');
+        
+    } catch (error) {
+        console.error('Error writing AI files:', error);
+        
+        const resultContainer = document.getElementById('writeFilesResult');
+        if (resultContainer) {
+            resultContainer.style.display = 'block';
+            resultContainer.innerHTML = `
+                <div class="error">
+                    <h4>Ошибка записи файлов</h4>
+                    <p>${error.message}</p>
+                </div>
+            `;
+        }
+        
+        showNotification('Ошибка при записи файлов: ' + error.message, 'error');
     }
 }
 
