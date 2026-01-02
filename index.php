@@ -122,6 +122,12 @@ try {
                     ApiHandler::handleReadMultipleFiles();
                 }
                 break;
+            
+            case 'write_multiple_files':
+                if (isset($_GET['ajax'])) {
+                    ApiHandler::handleWriteMultipleFiles();
+                }
+                break;
         }
     }
     
@@ -602,6 +608,33 @@ if (isset($_GET['ajax'])) {
             max-height: 300px;
             overflow-y: auto;
         }
+        
+        /* Стили для записи файлов */
+        .write-files-container {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f7fafc;
+            border-radius: 8px;
+            border: 1px solid #e2e8f0;
+        }
+        
+        .write-files-container h3 {
+            margin-bottom: 15px;
+            color: #2d3748;
+        }
+        
+        .warning-box {
+            background: #fefcbf;
+            border-left: 4px solid #d69e2e;
+            padding: 12px;
+            margin: 15px 0;
+            border-radius: 4px;
+        }
+        
+        .warning-box i {
+            color: #d69e2e;
+            margin-right: 8px;
+        }
     </style>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
@@ -731,7 +764,7 @@ if (isset($_GET['ajax'])) {
                         <div style="margin-top: 30px; color: #a0aec0;">
                             <p><i class="fas fa-check-circle"></i> Навигация по дереву файлов</p>
                             <p><i class="fas fa-check-circle"></i> Просмотр текстовых файлов</p>
-                            <p><i class="fas fa-check-circle"></i> Массовое чтение файлов</p>
+                            <p><i class="fas fa-check-circle"></i> Массовое чтение и запись файлов</p>
                         </div>
                     </div>
                 <?php endif; ?>
@@ -1007,11 +1040,41 @@ async function loadFilesContent() {
         const result = await response.json();
         console.log('Files content result:', result);
         
-        // Просто показываем textarea с JSON: ключи = пути, значения = контент
+        // Показываем textarea с JSON и добавляем кнопки для записи файлов
         if (resultContainer) {
             resultContainer.innerHTML = `
-                <div style="margin-top: 20px;">
-                    <textarea id="resultJsonTextarea" class="files-textarea json-textarea" rows="30" readonly>${escapeHtml(JSON.stringify(result, null, 2))}</textarea>
+                <div>
+                    <div class="write-files-container">
+                        <h3><i class="fas fa-save"></i> Запись файлов на сервер</h3>
+                        
+                        <div class="warning-box">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            <strong>Внимание!</strong> Эта операция перезапишет указанные файлы на сервере. 
+                            Убедитесь, что у вас есть резервные копии.
+                        </div>
+                        
+                        <p>Редактируйте JSON ниже, чтобы изменить содержимое файлов. Формат:</p>
+                        <pre style="background: #edf2f7; padding: 10px; border-radius: 5px; font-size: 12px;">{
+  "путь/к/файлу1.txt": "новое содержимое файла 1",
+  "путь/к/файлу2.php": "<?php echo 'новый код'; ?>"
+}</pre>
+                        
+                        <textarea id="resultJsonTextarea" class="files-textarea json-textarea" rows="20" style="margin-top: 15px;">${escapeHtml(JSON.stringify(result, null, 2))}</textarea>
+                        
+                        <div style="margin-top: 15px;">
+                            <button onclick="copyResultJson()" class="btn" style="margin-right: 10px;">
+                                <i class="fas fa-copy"></i> Копировать JSON
+                            </button>
+                            <button onclick="downloadResultJson()" class="btn" style="margin-right: 10px;">
+                                <i class="fas fa-download"></i> Скачать JSON
+                            </button>
+                            <button onclick="writeFilesContent()" class="btn btn-primary" style="background: #38a169; border-color: #38a169;">
+                                <i class="fas fa-save"></i> Записать файлы на сервер
+                            </button>
+                        </div>
+                        
+                        <div id="writeFilesResult" style="margin-top: 20px; display: none;"></div>
+                    </div>
                 </div>
             `;
         }
@@ -1029,6 +1092,108 @@ async function loadFilesContent() {
             `;
         }
         showNotification('Ошибка при чтении файлов: ' + error.message, 'error');
+    }
+}
+
+async function writeFilesContent() {
+    const textarea = document.getElementById('resultJsonTextarea');
+    if (!textarea) {
+        showNotification('Ошибка: JSON textarea не найден', 'error');
+        return;
+    }
+    
+    try {
+        // Парсим JSON из textarea
+        const jsonData = JSON.parse(textarea.value);
+        
+        if (typeof jsonData !== 'object' || jsonData === null) {
+            showNotification('Некорректный JSON формат', 'error');
+            return;
+        }
+        
+        const currentServer = '<?php echo escapeOutput($currentServer); ?>';
+        if (!currentServer) {
+            showNotification('Ошибка: сервер не выбран', 'error');
+            return;
+        }
+        
+        console.log('Writing files:', Object.keys(jsonData).length, 'files');
+        
+        const resultContainer = document.getElementById('writeFilesResult');
+        if (resultContainer) {
+            resultContainer.style.display = 'block';
+            resultContainer.innerHTML = `
+                <div style="text-align: center; padding: 20px;">
+                    <div class="loader"></div> 
+                    <p>Запись файлов на сервер...</p>
+                </div>
+            `;
+        }
+        
+        // Отправляем запрос на запись файлов
+        const response = await fetch(`?action=write_multiple_files&server=${encodeURIComponent(currentServer)}&ajax=1`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            },
+            body: JSON.stringify({
+                files: jsonData
+            })
+        });
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`HTTP error ${response.status}: ${errorText}`);
+        }
+        
+        const result = await response.json();
+        console.log('Write files result:', result);
+        
+        // Анализируем результат
+        let successCount = 0;
+        let errorCount = 0;
+        let resultHtml = '<div class="file-info-card"><h4>Результат записи файлов:</h4>';
+        
+        for (const [filePath, fileResult] of Object.entries(result)) {
+            if (fileResult.success) {
+                successCount++;
+                resultHtml += `<div style="color: #38a169; margin: 5px 0;">✓ ${escapeHtml(filePath)}: ${fileResult.message || 'Успешно'}</div>`;
+            } else {
+                errorCount++;
+                resultHtml += `<div style="color: #e53e3e; margin: 5px 0;">✗ ${escapeHtml(filePath)}: ${fileResult.error || 'Ошибка'}</div>`;
+            }
+        }
+        
+        resultHtml += `</div>`;
+        
+        if (resultContainer) {
+            resultContainer.innerHTML = resultHtml;
+        }
+        
+        // Прокручиваем к результату
+        if (resultContainer) {
+            resultContainer.scrollIntoView({ behavior: 'smooth' });
+        }
+        
+        showNotification(`Записано файлов: ${successCount} успешно, ${errorCount} с ошибками`, 
+            errorCount === 0 ? 'success' : 'warning');
+        
+    } catch (error) {
+        console.error('Error writing files:', error);
+        
+        const resultContainer = document.getElementById('writeFilesResult');
+        if (resultContainer) {
+            resultContainer.style.display = 'block';
+            resultContainer.innerHTML = `
+                <div class="error">
+                    <h4>Ошибка записи файлов</h4>
+                    <p>${error.message}</p>
+                </div>
+            `;
+        }
+        
+        showNotification('Ошибка при записи файлов: ' + error.message, 'error');
     }
 }
 
@@ -1141,6 +1306,11 @@ function showFileBrowser(server, path) {
     const resultContainer = document.getElementById('filesContentResult');
     if (resultContainer) {
         resultContainer.style.display = 'none';
+    }
+    
+    const writeResultContainer = document.getElementById('writeFilesResult');
+    if (writeResultContainer) {
+        writeResultContainer.style.display = 'none';
     }
     
     const fileBrowser = document.getElementById('fileBrowser');

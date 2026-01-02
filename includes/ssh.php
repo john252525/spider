@@ -153,6 +153,82 @@ class SSHManager {
         return $results;
     }
     
+    /**
+     * Запись нескольких файлов
+     * @param array $filesData Ассоциативный массив [путь_к_файлу => содержимое]
+     * @return array Результат операции для каждого файла
+     */
+    public function writeMultipleFiles($filesData) {
+        $results = [];
+        
+        foreach ($filesData as $filePath => $content) {
+            $filePath = trim($filePath);
+            if (empty($filePath)) continue;
+            
+            try {
+                $result = $this->writeFile($filePath, $content);
+                $results[$filePath] = [
+                    'success' => true,
+                    'message' => $result
+                ];
+            } catch (Exception $e) {
+                $results[$filePath] = [
+                    'success' => false,
+                    'error' => $e->getMessage()
+                ];
+            }
+        }
+        
+        return $results;
+    }
+    
+    /**
+     * Запись одного файла
+     * @param string $path Путь к файлу
+     * @param string $content Содержимое файла
+     * @return string Результат операции
+     */
+    public function writeFile($path, $content) {
+        $path = $this->sanitizePath($path);
+        
+        // Проверяем, существует ли родительская директория
+        $dir = dirname($path);
+        $checkDir = trim($this->executeCommand(
+            "if [ -d " . escapeshellarg($dir) . " ]; then echo '1'; else echo '0'; fi"
+        ));
+        
+        if ($checkDir !== '1') {
+            // Создаем директорию, если она не существует
+            $this->executeCommand("mkdir -p " . escapeshellarg($dir));
+        }
+        
+        // Экранируем содержимое для безопасной записи через echo
+        $escapedContent = str_replace(["'", "`", "$", "\""], ["'\''", "\`", "\$", "\""], $content);
+        
+        // Записываем файл
+        $command = sprintf(
+            "cat > %s << 'EOF'\n%s\nEOF",
+            escapeshellarg($path),
+            $content
+        );
+        
+        $output = $this->executeCommand($command);
+        
+        // Проверяем, что файл был создан
+        $checkFile = trim($this->executeCommand(
+            "if [ -f " . escapeshellarg($path) . " ]; then echo '1'; else echo '0'; fi"
+        ));
+        
+        if ($checkFile !== '1') {
+            throw new Exception("Не удалось создать файл: " . $path);
+        }
+        
+        // Получаем размер файла
+        $size = trim($this->executeCommand("stat -c%s " . escapeshellarg($path) . " 2>/dev/null || echo '0'"));
+        
+        return "Файл успешно записан. Размер: " . $size . " байт";
+    }
+    
     public function getFileInfo($path) {
         $path = $this->sanitizePath($path);
         
