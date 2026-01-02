@@ -202,6 +202,11 @@ class SSHManager {
             $this->executeCommand("mkdir -p " . escapeshellarg($dir));
         }
         
+        // Добавляем пустую строку в конец контента, если её там нет
+        if (substr($content, -1) !== "\n") {
+            $content .= "\n";
+        }
+        
         // Создаем временный файл на локальной машине
         $tempFile = tempnam(sys_get_temp_dir(), 'ssh_write_');
         file_put_contents($tempFile, $content);
